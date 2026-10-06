@@ -1,0 +1,42 @@
+{
+  "name": "urna",
+  "about": "urna.dev's palette, the same one rust/clitui/src/tui/pal.rs draws: the grey ramp tint(l) between #002b36 and #dfe8ea (ground 32 -> #002b36, surface 44 -> #0c3540, raised 58 -> #1a414b, line 84 -> #355861, faint 130 -> #658087, dim 170 -> #8ea3a9, ink 248 -> #dfe8ea), the title gradient #a8dcdc -> #85c8c8 and the thermometer low #c45c54, mid #c9a85c, high #6eb07c.",
+  "extends": "default",
+  "desc": "urna, end to end: urna setup on an empty machine (scan, plan, the offline embedder payload, the python env, the doctor checks), then urna tui: open a corpus, ask it, read the cited answer, check the install, quit.",
+  "max_hold": 2.6,
+  "window": {
+    "bg": ["#0c3540", "#002b36", "#001d25"],
+    "bar": ["#0c3540", "#06303b"],
+    "title_color": "#8ea3a9",
+    "radius": 16,
+    "pad": 22,
+    "bar_h": 40,
+    "lights": true
+  },
+  "brand": {
+    "text": "urna",
+    "font_size": 17,
+    "gradient": ["#a8dcdc", "#85c8c8"],
+    "tagline": "single-file · memory-mapped · hash-verified · offline"
+  },
+  "terminal": {
+    "fg": "#dfe8ea",
+    "bg": "#002b36",
+    "border": "#1a414b",
+    "cursor": "#85c8c8",
+    "palette16": [
+      "#002b36", "#c45c54", "#6eb07c", "#c9a85c", "#85c8c8", "#a8a0d8", "#a8dcdc", "#8ea3a9",
+      "#658087", "#d97a72", "#8fcf9c", "#e0c27d", "#a8dcdc", "#c4bdec", "#c8eeee", "#e6eeef"
+    ]
+  },
+  "caption": {
+    "bg": "#0c3540",
+    "fg": "#dfe8ea",
+    "accent": "#a8dcdc",
+    "muted": "#658087"
+  },
+  "progress": {
+    "track": "#1a414b",
+    "fill": "#85c8c8"
+  }
+}

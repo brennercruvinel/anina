@@ -1,0 +1,47 @@
+{
+  "name": "default",
+  "about": "the look of docs/ref/demo.svg: a deep blue window, a light terminal text, teal accents. any program.",
+  "max_hold": 3.0,
+  "window": {
+    "bg": ["#11344A", "#0D2534", "#091820"],
+    "bar": ["#173F55", "#102836"],
+    "title_color": "#8BA3B0",
+    "radius": 16,
+    "pad": 22,
+    "bar_h": 40,
+    "lights": true
+  },
+  "brand": {
+    "text": "",
+    "gradient": ["#7DE0D3", "#7DE0D3"],
+    "tagline": ""
+  },
+  "terminal": {
+    "fg": "#F7FAFC",
+    "bg": "#0B1E29",
+    "border": "#173F55",
+    "cursor": "#7DE0D3",
+    "radius": 8,
+    "font_family": "ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, Monaco, Consolas, 'DejaVu Sans Mono', monospace",
+    "font_size": 13,
+    "cell_w": 8,
+    "cell_h": 17,
+    "palette16": [
+      "#0B1E29", "#F07178", "#7DE0D3", "#FFCB6B", "#82AAFF", "#C792EA", "#89DDFF", "#D0DAE0",
+      "#5C7A8A", "#FF8B92", "#A5F0E6", "#FFE08A", "#A6C4FF", "#DDB3F5", "#B0EBFF", "#F7FAFC"
+    ]
+  },
+  "caption": {
+    "height": 34,
+    "font_size": 13,
+    "bg": "#0F2A3A",
+    "fg": "#F7FAFC",
+    "accent": "#7DE0D3",
+    "muted": "#8BA3B0"
+  },
+  "progress": {
+    "height": 3,
+    "track": "#173F55",
+    "fill": "#7DE0D3"
+  }
+}
