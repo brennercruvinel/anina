@@ -151,4 +151,9 @@ The reasons behind each choice are in [`docs/adr/`](docs/adr).
 
 ## License
 
-MIT. JetBrains Mono is under the SIL Open Font License (`assets/fonts/OFL.txt`).
+
+MIT, see [LICENSE](https://github.com/hoffresearch/urna/blob/main/LICENSE). [Hoff Research](https://hoffresearch.com)
+JetBrains Mono is under the SIL Open Font License (`assets/fonts/OFL.txt`).
+----
+Made it simple, but significant (∂μfμν = jν)
+Author: Brenner Cruvinel
