@@ -18,5 +18,7 @@ Why anina is built the way it is. `kind: decision` records a choice between opti
 | [0012](0012-one-timeline-many-writers.md) | decision | One timeline, many writers |
 | [0013](0013-a-workspace-of-layered-crates.md) | decision | Split anina into a workspace of layered crates |
 | [0014](0014-code-and-cli-speak-to-different-readers.md) | decision | The code and the CLI speak to different readers |
+| [0015](0015-waits-that-hold-until-the-program-answered.md) | lesson | A written wait holds until the program answered, in every terminal |
+| [0016](0016-put-back-only-what-a-play-changed.md) | decision | Put back only what a play changed in the sandbox |
 
 A new ADR takes the next number, follows `TEMPLATE.md` and joins this table.

@@ -1,0 +1,51 @@
+---
+id: ADR-0015
+title: A written wait holds until the program answered, in every terminal
+kind: lesson
+status: accepted
+category: TIMING
+date: 2026-10-07
+last-updated: 2026-10-07
+tags: [init, waits, audit, scroll, typing]
+supersedes: []
+superseded-by: null
+related: [rust/binary/src/taping/print.rs, rust/screen/src/lib.rs, ADR-0001, ADR-0008]
+---
+
+# ADR-0015: A written wait holds until the program answered, in every terminal
+
+## Context
+
+`anina init` turns a session into a tape, a step and then a wait. `anina audit` replays that tape from 120x40 down to 60x20. The first waits it wrote passed too early or never passed:
+
+- After a scroll it wrote `Idle 3`, because what scrolls into view depends on the terminal's height. `Idle` returns after 600 ms without a change and never fails. In a shell, the next keys went out before `cargo build` was done.
+- After typing it waited for the end of the typed text. That text is the terminal's echo, not the program's answer. In fzf or glow's `/` filter, the wait passed before the filter ran, and the next `Key enter` picked the old selection.
+- A typed line longer than 60 columns wraps in the smallest terminal. A word cut at the edge matched neither row by row nor with rows joined by spaces, so the echo wait never passed.
+
+## Decision
+
+- **After a scroll:** wait for new text within six rows of the cursor. Rows next to the cursor (a shell's last output, an editor's new line) show in every height. When the cursor is hidden or nothing new sits near it, `Idle 3` is still the step.
+- **After typing:** first the echo, then the program's answer, found away from the echo's rows (the cursor's rows when it shows, and any row holding the typed text): a `Wait` for text it brought up and a `Gone` for text it took away. A filter's bar shows with its first key, but its rows go only once it ran, so both are written when both exist. `Idle 3` comes only when neither exists. The echo may drop leading signs (`/install` echoes as `install`).
+- **Wrapped text:** a literal `Wait` also matches rows joined where a row is filled to its last column, the way the terminal wrapped it.
+
+## Consequences
+
+### Positive
+
+- A replay types the next key once the program has answered, in every size the audit tries.
+- A `Gone` can't fail because of the terminal's size. A smaller screen that never showed the text passes it right away.
+
+### Negative or accepted trade-offs
+
+- A hidden cursor says nothing about where the program draws, so a scroll there still settles with `Idle`.
+- A row that ends exactly at the last column and is followed by an unrelated row reads as one line to a literal wait. A false match needs the two rows to spell the waited text across the edge.
+
+### Follow-up
+
+- None.
+
+## References
+
+- `rust/binary/src/taping/print.rs` (`push_sync`, `appeared`, `reaction`, `vanished`)
+- `rust/screen/src/lib.rs` (`Screen::text_unwrapped`)
+- ADR-0001, ADR-0008
