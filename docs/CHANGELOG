@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Presets for glow, harlequin and helix, each recorded end to end in an empty sandbox.
+
+### Fixed
+
+- `anina presets` no longer lists the empty folders in `demo/` as invalid built-in presets, and `anina run` refuses them by name.
+
 ### Changed
 
 - One crate became a workspace of nine under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary, plus `anina-codecs`, `anina-design`, `anina-motion` and `anina-recode`, empty for now. Commands, flags and output are the same.

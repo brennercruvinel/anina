@@ -1,47 +1,41 @@
 # The names the code uses, and the public name users see when it differs.
 #
+# One table per term, so a duplicate term fails to parse.
 # `cli` is the public name: a command, a flag or a flag value. The code
 # names follow the code (ADR-0010); the cli names, file formats and output
 # names are the public vocabulary and stay as they are (ADR-0014).
 
-[[term]]
-name = "mapper"
+[terms.mapper]
 path = "rust/binary/src/mapper"
 about = "maps a program by itself: every screen and key, as a graph"
 cli = "explore"
 
-[[term]]
-name = "taping"
+[terms.taping]
 path = "rust/binary/src/taping"
 about = "writes a tape while you use the program"
 cli = "init"
 
-[[term]]
-name = "audits"
+[terms.audits]
 path = "rust/binary/src/audits"
 about = "the same journey across terminals, measured and scored"
 cli = "audit"
 
-[[term]]
-name = "checks"
+[terms.checks]
 path = "rust/binary/src/checks.rs"
 about = "looks through anina's output for anything redaction missed"
 cli = "check"
 
-[[term]]
-name = "cordon"
+[terms.cordon]
 path = "rust/record/src/cordon"
 about = "isolates a run: fresh HOME and environment, the OS sandbox when strict"
 cli = "--sandbox"
 
-[[term]]
-name = "inner"
+[terms.inner]
 path = "rust/runner/src/engine/inner.rs"
 about = "the in-process terminal engine"
 cli = "tui-test"
 
-[[term]]
-name = "outer"
+[terms.outer]
 path = "rust/runner/src/engine/outer.rs"
 about = "the tmux engine, the fallback"
 cli = "tmux"

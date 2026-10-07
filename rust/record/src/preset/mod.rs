@@ -88,7 +88,7 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
             return Ok(d.join(name));
         }
     }
-    if let Some(dir) = BUILTIN.get_dir(name) {
+    if let Some(dir) = BUILTIN.get_dir(name).filter(|d| is_builtin(d)) {
         let dest = cache_dir().join("presets");
         std::fs::create_dir_all(&dest)?;
         let _ = std::fs::remove_dir_all(dest.join(name));
@@ -100,6 +100,12 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
     }
     let known: Vec<String> = list_all().into_iter().map(|(n, _)| n).collect();
     bail!("no preset {name:?}; known: {}", known.join(", "))
+}
+
+/// A built-in folder is a preset only with its manifest; `demo/` also keeps
+/// empty folders for presets still to come.
+fn is_builtin(d: &Dir) -> bool {
+    d.get_file(d.path().join("preset.toml")).is_some()
 }
 
 /// Every preset anina can find: (name, where).
@@ -116,7 +122,7 @@ fn list_all() -> Vec<(String, String)> {
             }
         }
     }
-    for d in BUILTIN.dirs() {
+    for d in BUILTIN.dirs().filter(|d| is_builtin(d)) {
         let n = d.path().display().to_string();
         if !seen.iter().any(|(s, _)| *s == n) {
             seen.push((n, "built in".into()));
