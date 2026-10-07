@@ -72,7 +72,55 @@ pub fn wait_failed(screen: &Screen, pat: &Pattern, gone: bool, secs: f64, dump: 
         && std::fs::write(dir.join("failed.txt"), &text).is_ok()
         && std::fs::write(dir.join("failed.ansi"), screen.to_ansi()).is_ok()
     {
-        msg.push_str(&format!("\n  saved: {}", dir.join("failed.txt").display()));
+        msg.push_str(&format!("\n  saved: {}", self::shown(&dir.join("failed.txt"))));
     }
     anyhow::anyhow!(msg)
+}
+
+/// A path the way a status line shows it: relative to the working directory
+/// when it is under it, `~/...` under HOME, as is otherwise. Output pasted into
+/// a README or an issue then names no machine. A working directory at `/` or
+/// above HOME (`/Users`) does not count: relative to it, a path would still
+/// spell out the user's folder.
+pub fn shown(p: &std::path::Path) -> String {
+    let cwd: Vec<std::path::PathBuf> = std::env::current_dir()
+        .map(|c| vec![std::fs::canonicalize(&c).unwrap_or_else(|_| c.clone()), c])
+        .unwrap_or_default();
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    shown_from(p, &cwd, home.as_deref())
+}
+
+fn shown_from(p: &std::path::Path, cwd: &[std::path::PathBuf], home: Option<&std::path::Path>) -> String {
+    if !p.is_absolute() {
+        return p.display().to_string();
+    }
+    let rel = |base: &std::path::Path| p.strip_prefix(base).ok().map(|r| r.display().to_string());
+    let above_home = |d: &std::path::Path| d.parent().is_none() || home.is_some_and(|h| h != d && h.starts_with(d));
+    if let Some(r) = cwd.iter().filter(|d| !above_home(d)).find_map(|d| rel(d)) {
+        return if r.is_empty() { ".".into() } else { r };
+    }
+    if let Some(r) = home.filter(|h| h.parent().is_some()).and_then(rel) {
+        return if r.is_empty() { "~".into() } else { format!("~/{r}") };
+    }
+    p.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_path_names_no_machine_from_any_working_directory() {
+        let home = Some(Path::new("/home/runner"));
+        let out = Path::new("/home/runner/anina-out/shell/index.html");
+        let at = |d: &str| shown_from(out, &[PathBuf::from(d)], home);
+        assert_eq!(at("/home/runner/anina-out"), "shell/index.html");
+        assert_eq!(at("/home/runner"), "anina-out/shell/index.html");
+        assert_eq!(at("/"), "~/anina-out/shell/index.html");
+        assert_eq!(at("/home"), "~/anina-out/shell/index.html");
+        assert_eq!(at("/srv"), "~/anina-out/shell/index.html");
+        assert_eq!(shown_from(Path::new("/tmp/x.svg"), &[PathBuf::from("/")], home), "/tmp/x.svg");
+        assert_eq!(shown_from(out, &[], Some(Path::new("/"))), out.display().to_string());
+    }
 }

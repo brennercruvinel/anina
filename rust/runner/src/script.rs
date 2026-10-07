@@ -236,6 +236,12 @@ pub fn parse_step(words: &[String], warnings: &mut Vec<String>) -> Result<Option
             if args.len() == 2 && at.is_none() && duration(&args[1]).is_ok() {
                 Step::Type { text: args[0].clone(), delay: Some(duration(&args[1])?) }
             } else {
+                if args.len() > 2 && at.is_none() && args.last().is_some_and(|w| duration(w).is_ok()) {
+                    warnings.push(format!(
+                        "Type: the last word {:?} is typed as text; with several words, set the delay as Type@30ms",
+                        args[args.len() - 1]
+                    ));
+                }
                 Step::Type { text: args.join(""), delay: at }
             }
         }
@@ -541,5 +547,18 @@ mod tests {
     #[test]
     fn the_lenient_expand_is_unchanged() {
         assert_eq!(expand("$ANINA_TEST_NOPE/x", &vars()), "/x");
+    }
+
+    #[test]
+    fn a_trailing_delay_after_several_words_is_flagged() {
+        let mut w = Vec::new();
+        let words: Vec<String> = ["Type", "a ", "'", "b", "0.03"].iter().map(|s| s.to_string()).collect();
+        let step = parse_step(&words, &mut w).unwrap().unwrap();
+        assert!(matches!(step, Step::Type { ref text, .. } if text == "a 'b0.03"));
+        assert_eq!(w.len(), 1, "{w:?}");
+        let mut w = Vec::new();
+        let words: Vec<String> = ["Type", "abc", "0.03"].iter().map(|s| s.to_string()).collect();
+        parse_step(&words, &mut w).unwrap();
+        assert!(w.is_empty());
     }
 }

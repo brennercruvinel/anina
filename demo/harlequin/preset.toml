@@ -1,0 +1,14 @@
+name = "harlequin"
+description = "harlequin, the SQL IDE for the terminal: a CSV queried with DuckDB, offline"
+homepage = "https://harlequin.sh"
+sandbox = "env"
+
+[[requires]]
+program = "harlequin"
+hint = "uv tool install harlequin, or pipx install harlequin"
+
+[[parts]]
+name = "query"
+tape = "query.tape"
+title = "harlequin: a CSV, one query, the results"
+about = "the catalog, a query typed in the editor, the results table, quit"

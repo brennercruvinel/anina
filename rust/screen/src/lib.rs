@@ -123,10 +123,9 @@ impl Pattern {
         }
     }
     pub fn matches(&self, screen: &Screen) -> bool {
-        let text = screen.text();
         match self {
-            Pattern::Text(t) => text.contains(t.as_str()) || screen.text_flat().contains(t.as_str()),
-            Pattern::Regex(r) => r.is_match(&text),
+            Pattern::Text(t) => screen.shows(t),
+            Pattern::Regex(r) => r.is_match(&screen.text()),
         }
     }
     pub fn as_str(&self) -> &str {
@@ -180,6 +179,48 @@ impl Screen {
     pub fn text_flat(&self) -> String {
         let joined = (0..self.rows).map(|y| self.row_text(y)).collect::<Vec<_>>().join(" ");
         joined.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Rows as text, a row filled to the last column joined to the next with
+    /// nothing in between: a line the terminal wrapped at its edge reads as
+    /// one, wherever the edge cut it (a word split at column 60).
+    pub fn text_unwrapped(&self) -> String {
+        let mut out = String::new();
+        for y in 0..self.rows {
+            out.push_str(&self.row_text(y));
+            if !self.row_full(y) && y + 1 < self.rows {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// Whether row `y` is filled to its last column: the terminal may have
+    /// wrapped its line onto the next row.
+    pub fn row_full(&self, y: u16) -> bool {
+        self.cols > 0 && y < self.rows && self.cell(self.cols - 1, y).ch != " "
+    }
+
+    /// The ways a literal wait reads the screen: row by row, rows joined by
+    /// spaces (text a program wrapped), rows joined where the terminal
+    /// wrapped them.
+    fn views(&self) -> [String; 3] {
+        [self.text(), self.text_flat(), self.text_unwrapped()]
+    }
+
+    /// Whether a literal `Wait t` passes on this screen. `anina init` asks
+    /// the same question when it picks a wait, so what it writes and what the
+    /// replay sees cannot disagree.
+    pub fn shows(&self, t: &str) -> bool {
+        !t.is_empty() && self.views().iter().any(|v| v.contains(t))
+    }
+
+    /// How many times `t` shows, in the view that shows it most.
+    pub fn count_shown(&self, t: &str) -> usize {
+        if t.is_empty() {
+            return 0;
+        }
+        self.views().iter().map(|v| v.matches(t).count()).max().unwrap_or(0)
     }
 
     /// The number of rows up to the last one that holds anything visible.
@@ -321,4 +362,19 @@ pub fn sgr(fg: Color, bg: Color, attrs: u8) -> String {
     }
     s.push('m');
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wait_matches_text_the_terminal_wrapped_at_its_edge() {
+        let s = escape::parse("$ printf 'build %s' comp\r\nlete\r\n$ ", 24, 3);
+        assert_eq!(s.row_text(0), "$ printf 'build %s' comp");
+        assert!(Pattern::parse("complete").unwrap().matches(&s));
+        // a short row is not continued by the next
+        let s = escape::parse("ready\r\nnow", 24, 2);
+        assert!(!Pattern::parse("readynow").unwrap().matches(&s));
+    }
 }

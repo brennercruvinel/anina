@@ -142,7 +142,7 @@ pub fn retitle(g: &mut Graph) {
                     .max_by_key(letters)
             });
         if let Some(l) = distinct {
-            g.states[i].title = truncate(&format!("{} — {}", titles[i], l), 64);
+            g.states[i].title = truncate(&format!("{} · {}", titles[i], l), 64);
         }
     }
 }
