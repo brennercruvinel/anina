@@ -4,14 +4,23 @@
 
 ### Added
 
-- Presets for glow, harlequin and helix, each recorded end to end in an empty sandbox.
+- Presets for glow, harlequin and helix, each recorded end to end in an empty sandbox. Their steps and waits come from `anina init`; harlequin and helix check their result inside the tape (`Wait "27,211"`, `Exec grep`).
+- `anina audit --preset NAME [--part P]`: a preset's parts played in every terminal of the matrix, each one starting from the sandbox as prepare left it.
+- `anina compare A B`: two runs compared with timing taken out (files, screens as text, PNG pixels, reports). Exits 1 on a difference.
+- `--embed` on `run` and `audit`: the images go inside `index.html` / `report.html`, one file to share.
+- Every PNG anina writes carries the text of the screen it shows, and `anina check` reads it. `run`, `record`, `audit` and `explore` end with that check on what they wrote.
+- A tape warns when a `Type` with several words ends in something that reads as a delay: it is typed as text; `Type@30ms` sets the delay.
 
 ### Fixed
 
+- Status lines no longer print the machine's paths: a path shows relative to the working directory, or as `~/...`. The audit summary printed the full tape path.
+- `anina init` writes waits that hold in the other sizes `anina audit` tries. Text new to the session comes first (a closing popup that uncovers old text does not count); after typing, the wait is the end of what was typed; a scroll gets `Idle 3`; a wait is at most 24 characters, ends before column 56 and is never a padded row or a counter. Text keys under 0.25 s apart stay one `Type` even when a completion popup redraws the screen.
+- `tool/tasks/fullcheck.sh` packages in a target dir of its own on every run; a reused one verified the workspace against crates an earlier run had packaged at the same version.
 - `anina presets` no longer lists the empty folders in `demo/` as invalid built-in presets, and `anina run` refuses them by name.
 
 ### Changed
 
+- The run's part line reads `part 1/1 edit · title` (a middle dot instead of a dash), so the output pastes into docs as is.
 - One crate became a workspace of nine under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary, plus `anina-codecs`, `anina-design`, `anina-motion` and `anina-recode`, empty for now. Commands, flags and output are the same.
 - Modules renamed on the way:
   - `ansi`, `cast`, `teach` -> `anina_screen::escape`, `frames`, `lesson`
