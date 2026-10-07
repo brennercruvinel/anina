@@ -36,23 +36,23 @@ On macOS, `std::fs::copy` already clones on APFS, and on Linux it uses `copy_fil
 
 ### Put back only what changed
 
-A `Snapshot` (kind, size, mtime per path) taken after `freeze` and after every restore. Before the next play, the paths that differ, topmost only, are deleted and copied back from the saved tree.
+A `Snapshot` (kind, size, mtime, ctime and mode per path, the path kept as bytes) taken after `freeze` and updated after every restore. Before the next play, the paths that differ, topmost only, are deleted and copied back from the saved tree. A folder whose permissions alone changed gets them back, and its content is compared entry by entry.
 
 ## Decision
 
-Put back only what changed, and skip the first restore. If putting back fails, the whole tree is copied again as before. Sockets, FIFOs and devices are not copied, because they belong to the process that made them. Folders keep their permissions, and deleting a tree gives every folder back its owner's write bit first.
+Put back only what changed, and skip the first restore. A file differs on any change of size, mtime, ctime or mode. The ctime moves on every write, chmod or rename, and no program can set it back, so an edit that keeps size and mtime still shows. After putting back, only the paths it touched are read again. Putting back fails on anything but a missing path, and then the whole tree is copied again as before. Sockets, FIFOs and devices are not copied, because they belong to the process that made them. Folders keep their permissions, and deleting a tree gives every folder back its owner's write bit first.
 
 ## Consequences
 
 ### Positive
 
-- A restore costs two walks of the sandbox plus what the play wrote.
+- A restore costs one walk of the sandbox plus what the play wrote.
 - A sandbox with a socket, a FIFO or a read-only cache audits, and a second `anina run` can empty it.
 
 ### Negative or accepted trade-offs
 
-- A change that keeps a file's size and mtime goes unseen. A play that rewrites a file and resets its mtime would carry it into the next terminal.
-- A changed folder permission is not put back.
+- Folders compare by kind and permissions only, so a folder's own timestamps don't matter. Its entries are compared one by one instead.
+- APFS refuses names that are not UTF-8, so on macOS only the Linux run of CI covers that case.
 
 ### Follow-up
 
@@ -62,4 +62,5 @@ Put back only what changed, and skip the first restore. If putting back fails, t
 
 - `rust/record/src/preset/mod.rs` (`Stage::freeze`, `Stage::restore`, `copy_tree`, `remove_tree`)
 - `rust/record/src/cordon/diffs.rs` (`Snapshot::differs`)
+- Review of #58: #59 and its sub-issues #60 to #68
 - ADR-0006
