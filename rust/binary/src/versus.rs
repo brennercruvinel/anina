@@ -18,8 +18,24 @@ pub struct Args {
     pub b: PathBuf,
 }
 
-/// Report fields that hold time or sampling, never compared.
-const TIMING_KEYS: [&str; 5] = ["seconds", "recorded", "frames", "screens", "first_screen"];
+/// Report fields that hold time or sampling, never compared: the run's
+/// clock (`recorded`, `generated`), its durations, its frame counts and the
+/// latencies measured from them.
+const TIMING_KEYS: [&str; 9] = [
+    "seconds",
+    "recorded",
+    "generated",
+    "frames",
+    "screens",
+    "first_screen",
+    "first_screen_s",
+    "duration_s",
+    "latency",
+];
+
+/// Audit scores computed from those timings: their number and explanation
+/// move with the clock, so only their category and rule are compared.
+const TIMED_SCORES: [&str; 1] = ["responsiveness"];
 
 /// `[4.7s]` in a transcript: when a step happened.
 static STAMP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d+(?:\.\d+)?s\]").unwrap());
@@ -145,6 +161,9 @@ fn strip(v: &mut serde_json::Value) {
     match v {
         serde_json::Value::Object(m) => {
             m.retain(|k, _| !TIMING_KEYS.contains(&k.as_str()));
+            if m.get("category").and_then(|c| c.as_str()).is_some_and(|c| TIMED_SCORES.contains(&c)) {
+                m.retain(|k, _| k == "category" || k == "rule");
+            }
             m.values_mut().for_each(strip);
         }
         serde_json::Value::Array(a) => a.iter_mut().for_each(strip),
@@ -195,6 +214,15 @@ mod tests {
         let b = br#"{"seconds":16.2,"recorded":"y","parts":[{"name":"p","frames":148,"shots":["a"]}]}"#;
         assert_eq!(report(a), report(b));
         let c = br#"{"seconds":16.2,"parts":[{"name":"p","shots":["b"]}]}"#;
+        assert_ne!(report(a), report(c));
+    }
+
+    #[test]
+    fn two_audits_of_the_same_run_match() {
+        let a = br#"{"generated":"2026-10-07T20:00:00Z","scores":[{"category":"responsiveness","score":91,"rule":"r","explain":["first screen after 180 ms"]},{"category":"stability","score":100,"rule":"s","explain":["ran"]}],"variants":[{"first_screen_s":0.18,"duration_s":4.1,"latency":{"p50_ms":20.0},"exit_code":0}]}"#;
+        let b = br#"{"generated":"2026-10-07T20:01:00Z","scores":[{"category":"responsiveness","score":88,"rule":"r","explain":["first screen after 240 ms"]},{"category":"stability","score":100,"rule":"s","explain":["ran"]}],"variants":[{"first_screen_s":0.24,"duration_s":4.3,"latency":{"p50_ms":31.0},"exit_code":0}]}"#;
+        assert_eq!(report(a), report(b));
+        let c = br#"{"generated":"x","scores":[{"category":"stability","score":50,"rule":"s","explain":["broke"]}],"variants":[]}"#;
         assert_ne!(report(a), report(c));
     }
 
