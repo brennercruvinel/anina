@@ -33,7 +33,7 @@
 //! needs = ["BURN_DIR"]            # skipped (with a note) while a var is empty
 //! ```
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -121,5 +121,48 @@ impl Manifest {
             anyhow::ensure!(dir.join(&p.tape).is_file(), "{}: part {} has no tape {}", path.display(), p.name, p.tape);
         }
         Ok(m)
+    }
+
+    /// The parts named in `names`, or every part when it is empty. Only reads
+    /// the manifest, so a wrong `--part` fails before any work.
+    pub fn pick(&self, names: &[String]) -> Result<Vec<&Part>> {
+        if names.is_empty() {
+            return Ok(self.parts.iter().collect());
+        }
+        names
+            .iter()
+            .map(|p| {
+                self.parts.iter().find(|x| &x.name == p).ok_or_else(|| {
+                    anyhow!(
+                        "{} has no part {p:?}; parts: {}",
+                        self.name,
+                        self.parts.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", ")
+                    )
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pick_names_a_wrong_part_from_the_manifest_alone() {
+        let m: Manifest = toml::from_str(
+            r#"name = "burn"
+[[parts]]
+name = "train"
+tape = "train.tape"
+[[parts]]
+name = "stop"
+tape = "stop.tape""#,
+        )
+        .unwrap();
+        assert_eq!(m.pick(&[]).unwrap().len(), 2);
+        assert_eq!(m.pick(&["stop".into()]).unwrap()[0].name, "stop");
+        let e = m.pick(&["trian".into()]).unwrap_err().to_string();
+        assert_eq!(e, r#"burn has no part "trian"; parts: train, stop"#);
     }
 }

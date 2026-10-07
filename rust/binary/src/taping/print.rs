@@ -5,8 +5,10 @@
 //!
 //! The waits must hold in other terminal sizes too (`anina audit` replays the
 //! tape in several): after typing, the end of what was typed (it stays next
-//! to the cursor); after a scroll, `Idle` (what scrolls into view depends on
-//! the height); never a whole row whose columns are aligned by padding.
+//! to the cursor) and then what the program did with it; after a scroll,
+//! text near the cursor (what scrolls into view far from it depends on the
+//! height), `Idle` only when there is none; never a whole row whose columns
+//! are aligned by padding.
 
 use super::input::Ev;
 use anina_screen::{Mask, Screen};
@@ -474,35 +476,150 @@ fn push_sync(
     step: Option<&Out>,
 ) {
     if before.cells != after.cells {
-        if let Some(Out::Type(typed)) = step
-            && let Some(tail) = typed_tail(typed, before, after)
-        {
-            out.push(format!("Wait {}", quote(&tail)));
+        if let Some(Out::Type(typed)) = step {
+            // the echo is the terminal's; what the program does with the text
+            // (a filter, a completion) shows elsewhere, and only then is the
+            // next key safe
+            let echo = typed_tail(typed, before, after);
+            let reacted = reaction(typed, before, after, volatile, seen);
+            if echo.is_some() || !reacted.is_empty() {
+                out.extend(echo.map(|t| format!("Wait {}", quote(&t))));
+                out.extend(reacted);
+                return;
+            }
+        }
+        if let Some(w) = appeared(before, after, volatile, seen) {
+            out.push(w);
             return;
         }
         if scrolled(before, after) {
-            // bounded: a blinking cursor keeps a screen from ever going idle
+            // nothing to anchor on: at least let it settle (bounded, since a
+            // blinking cursor keeps a screen from ever going idle)
             out.push("Idle 3".into());
             return;
         }
-    }
-    if before.cells != after.cells
-        && let Some(w) = distinctive(before, after, volatile, seen)
-    {
-        out.push(format!("Wait {w}"));
-        return;
     }
     if gap >= 0.25 {
         out.push(format!("Sleep {:.2}", gap.min(3.0)));
     }
 }
 
+/// Rows a wait may sit from the cursor once the screen scrolled: they stay
+/// in view down to the 20 rows of the smallest terminal `anina audit` tries,
+/// even with lines wrapped at 60 columns.
+const SCROLL_REACH: u16 = 6;
+
+/// `Wait` for text the step brought up. After a scroll, only text near the
+/// cursor: what shows far from it depends on the terminal's height, while
+/// the rows next to the cursor (a shell's last output, an editor's new line)
+/// show in every size.
+fn appeared(before: &Screen, after: &Screen, mask: &Mask, seen: &str) -> Option<String> {
+    let w = if scrolled(before, after) {
+        let far = far_from_cursor(after)?;
+        distinctive(before, after, &union(mask, &far), seen)
+    } else {
+        distinctive(before, after, mask, seen)
+    };
+    w.map(|w| format!("Wait {w}"))
+}
+
+/// Every row more than `SCROLL_REACH` from the cursor; none when the cursor
+/// is hidden (then it says nothing about where the program draws).
+fn far_from_cursor(s: &Screen) -> Option<Mask> {
+    if !s.cursor.visible {
+        return None;
+    }
+    let mut m = Mask::new(s.cols, s.rows);
+    for y in (0..s.rows).filter(|y| y.abs_diff(s.cursor.y) > SCROLL_REACH) {
+        (0..s.cols).for_each(|x| m.set(x, y));
+    }
+    Some(m)
+}
+
+/// After typing, the steps that show the program answered: text it brought
+/// up off the echo's rows and text it took away (`Gone`: a filter dropping
+/// rows), both when there are both (a filter's bar shows with its first key,
+/// its rows go only once it ran), else `Idle`. Empty when nothing but the
+/// echo's rows changed.
+fn reaction(typed: &str, before: &Screen, after: &Screen, volatile: &Mask, seen: &str) -> Vec<String> {
+    if before.cols != after.cols || before.rows != after.rows {
+        return Vec::new();
+    }
+    let mut mask = volatile.clone();
+    for y in echo_rows(typed, before, after) {
+        (0..after.cols).for_each(|x| mask.set(x, y));
+    }
+    let d = before.diff(after);
+    let moved = (0..after.rows).any(|y| (0..after.cols).any(|x| d.get(x, y) && !mask.get(x, y)));
+    if !moved {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = appeared(before, after, &mask, seen).into_iter().collect();
+    out.extend(vanished(before, after, &mask).map(|g| format!("Gone {}", quote(&g))));
+    if out.is_empty() {
+        out.push("Idle 3".into());
+    }
+    out
+}
+
+/// The rows the echo of `typed` may be on: the cursor's (from where typing
+/// started to where it ended, when the cursor shows) and any row that holds
+/// the text (a hidden cursor says nothing).
+fn echo_rows(typed: &str, before: &Screen, after: &Screen) -> Vec<u16> {
+    let mut rows = Vec::new();
+    if before.cursor.visible && after.cursor.visible {
+        let (lo, hi) = (before.cursor.y.min(after.cursor.y), before.cursor.y.max(after.cursor.y));
+        rows.extend(lo..=hi.min(after.rows.saturating_sub(1)));
+    }
+    let text = typed.trim_start_matches(|c: char| !c.is_alphanumeric()).trim_end();
+    if !text.is_empty() {
+        rows.extend((0..after.rows).filter(|y| after.row_text(*y).contains(text)));
+    }
+    rows
+}
+
+/// Text on `before` that `after` no longer shows: unique, stable, short,
+/// digit-free, from the row nearest the cursor (rows far from it may not
+/// be on a smaller screen to begin with).
+fn vanished(before: &Screen, after: &Screen, mask: &Mask) -> Option<String> {
+    let (bt, at, af) = (before.text(), after.text(), after.text_flat());
+    let cy = after.cursor.y;
+    let mut best: Option<(u16, String)> = None;
+    for y in 0..before.rows {
+        for seg in segments(before, y) {
+            let chars: Vec<char> = seg.text.chars().collect();
+            let (a, b) = trim_span(&chars);
+            if b <= a || seg.cols[a..b].iter().any(|x| mask.get(*x, y)) {
+                continue;
+            }
+            let text: String = chars[a..b].iter().collect();
+            let ok = text.chars().filter(|c| c.is_alphanumeric()).count() >= 3
+                && text.chars().count() <= MAX_WAIT
+                && !text.chars().any(|c| c.is_ascii_digit())
+                && !(text.contains('\'') && text.contains('"'))
+                && count(&bt, &text) == 1
+                && !at.contains(&text)
+                && !af.contains(&text);
+            let dist = y.abs_diff(cy);
+            if ok && best.as_ref().is_none_or(|(d, _)| dist < *d) {
+                best = Some((dist, text));
+            }
+        }
+    }
+    best.map(|(_, t)| t)
+}
+
 /// The shortest end of `typed`, cut at a word, that shows once on `after`
 /// and not on `before`: the text next to the cursor, on screen at any width.
+/// Leading signs may be keys that opened the field (`/` to filter, `:`).
 fn typed_tail(typed: &str, before: &Screen, after: &Screen) -> Option<String> {
     let (b, a) = (before.text(), after.text());
-    let starts = std::iter::once(0).chain(typed.match_indices(' ').map(|(i, _)| i + 1));
-    let mut tails: Vec<&str> = starts.map(|i| &typed[i..]).collect();
+    let first_word = typed.find(char::is_alphanumeric).into_iter();
+    let mut starts: Vec<usize> = std::iter::once(0).chain(first_word).collect();
+    starts.extend(typed.match_indices(' ').map(|(i, _)| i + 1));
+    starts.sort_unstable();
+    starts.dedup();
+    let mut tails: Vec<&str> = starts.into_iter().map(|i| &typed[i..]).collect();
     tails.reverse(); // shortest first
     tails
         .into_iter()
@@ -569,8 +686,11 @@ fn merge_keys(lines: Vec<String>) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// The lines, with the cursor shown after the last one.
     fn screen(lines: &[&str]) -> Screen {
-        anina_screen::escape::parse(&lines.join("\r\n"), 60, lines.len() as u16)
+        let mut s = anina_screen::escape::parse(&lines.join("\r\n"), 60, lines.len() as u16);
+        s.cursor.visible = true;
+        s
     }
 
     #[test]
@@ -580,6 +700,61 @@ mod tests {
         assert!(scrolled(&a, &b));
         let c = screen(&["title", "other", "things", "on", "a", "new screen", "status"]);
         assert!(!scrolled(&a, &c));
+    }
+
+    fn sync(before: &Screen, after: &Screen, step: Option<&Out>) -> Vec<String> {
+        let mut out = Vec::new();
+        push_sync(&mut out, before, after, &Mask::new(before.cols, before.rows), 1.0, "", step);
+        out
+    }
+
+    #[test]
+    fn a_scrolled_shell_waits_for_the_output_by_the_prompt() {
+        let a = screen(&["$ ls", "a", "b", "c", "d", "e", "f", "$ cargo build"]);
+        let b = screen(&["b", "c", "d", "e", "f", "$ cargo build", "    Finished `dev` profile in 3.2s", "$ "]);
+        assert!(scrolled(&a, &b));
+        let w = sync(&a, &b, Some(&Out::Key("enter".into(), 1)));
+        assert_eq!(w, ["Wait 'Finished `dev` profile'"]);
+    }
+
+    #[test]
+    fn a_scroll_with_new_text_only_far_from_the_cursor_settles() {
+        let rows: Vec<String> = (1..=20).map(|i| format!("row {i} of the log")).collect();
+        let mut moved: Vec<String> = rows[3..].to_vec();
+        moved.extend(["fresh tail text".to_string(), "more tail words".into(), "last tail line".into()]);
+        let a = screen(&rows.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut b = anina_screen::escape::parse(&format!("{}\x1b[1;1H", moved.join("\r\n")), 60, 20);
+        b.cursor.visible = true;
+        assert!(scrolled(&a, &b));
+        assert_eq!(sync(&a, &b, Some(&Out::Key("down".into(), 3))), ["Idle 3"]);
+    }
+
+    #[test]
+    fn after_a_filter_the_wait_is_what_it_took_away() {
+        let a = screen(&["  README.md", "  src/main.rs", "  Cargo.toml", "  3/3", "> "]);
+        let b = screen(&["", "", "  src/main.rs", "  1/3", "> src"]);
+        assert_eq!(sync(&a, &b, Some(&Out::Type("src".into()))), ["Gone README.md"]);
+        let a = screen(&["  README.md", "  src/main.rs", "  docs/install-guide.md", "  3/3", "> "]);
+        let b = screen(&["", "", "  docs/install-guide.md", "  1/3", "> install guide"]);
+        assert_eq!(
+            sync(&a, &b, Some(&Out::Type("install guide".into()))),
+            ["Wait 'install guide'", "Gone src/main.rs"]
+        );
+    }
+
+    #[test]
+    fn a_filter_bar_is_not_enough_the_rows_must_go() {
+        let a = screen(&["  roadmap.md", "  install-guide.md", "  contributing.md", "", "  ↑/↓ choose"]);
+        let b = screen(&["  install-guide.md", "", "", "enter open • esc cancel", "  Find: install"]);
+        let w = sync(&a, &b, Some(&Out::Type("/install".into())));
+        assert_eq!(w, ["Wait 'enter open • esc cancel'", "Gone contributing.md"]);
+    }
+
+    #[test]
+    fn typing_at_a_prompt_waits_for_the_echo_alone() {
+        let a = screen(&["$ ls", "Cargo.toml", "$ "]);
+        let b = screen(&["$ ls", "Cargo.toml", "$ cargo build --release"]);
+        assert_eq!(sync(&a, &b, Some(&Out::Type("cargo build --release".into()))), ["Wait --release"]);
     }
 
     #[test]

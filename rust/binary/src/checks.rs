@@ -10,7 +10,8 @@ use anyhow::{Result, bail};
 use regex::Regex;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
+use std::time::{Duration, SystemTime};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -35,19 +36,39 @@ pub fn run(a: Args) -> Result<()> {
     check(&paths)
 }
 
-/// Check what a command just wrote, before it reports success.
+/// When the command started: `verify` checks what was written since.
+static STARTED: OnceLock<SystemTime> = OnceLock::new();
+
+/// Mark the start of the command, before it writes anything.
+pub fn mark_start() {
+    let _ = STARTED.set(SystemTime::now());
+}
+
+/// Check what a command just wrote, before it reports success: the files
+/// under `out` written since `mark_start`, not a note the user keeps there
+/// or what an earlier run left (`anina check` reads those).
 pub fn verify(out: &Path) -> Result<()> {
-    check(&[out.to_path_buf()])
+    // a little before the start: some file systems keep whole seconds
+    let since = STARTED.get().map(|t| *t - Duration::from_secs(2));
+    check_since(&[out.to_path_buf()], since)
 }
 
 fn check(paths: &[PathBuf]) -> Result<()> {
+    check_since(paths, None)
+}
+
+fn written_since(f: &Path, since: Option<SystemTime>) -> bool {
+    since.is_none_or(|t| std::fs::metadata(f).and_then(|m| m.modified()).is_ok_and(|m| m >= t))
+}
+
+fn check_since(paths: &[PathBuf], since: Option<SystemTime>) -> Result<()> {
     let red = Redactor::shared();
     let (mut files, mut pngs, mut blind, mut skipped, mut found) = (0, 0, 0, 0, Vec::new());
     for p in paths {
         if !p.exists() {
             bail!("{} does not exist", p.display());
         }
-        for f in walk(p) {
+        for f in walk(p).into_iter().filter(|f| written_since(f, since)) {
             match read(&f)? {
                 Content::Text(text) => {
                     files += 1;
@@ -230,6 +251,21 @@ mod tests {
         r.add("home path", "/Users/alice", Some("~")).unwrap();
         r.add("user name", r"\balice\b", Some("user")).unwrap();
         r
+    }
+
+    #[test]
+    fn verify_reads_what_was_written_since_the_start_only() {
+        let dir = std::env::temp_dir().join(format!("anina-since-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (old, new) = (dir.join("note.md"), dir.join("run.json"));
+        std::fs::write(&old, "/Users/alice").unwrap();
+        std::fs::write(&new, "{}").unwrap();
+        let hour_ago = SystemTime::now() - Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(&old).unwrap().set_modified(hour_ago).unwrap();
+        let since = Some(SystemTime::now() - Duration::from_secs(60));
+        assert!(!written_since(&old, since) && written_since(&new, since));
+        assert!(written_since(&old, None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

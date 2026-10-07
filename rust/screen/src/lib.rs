@@ -125,7 +125,11 @@ impl Pattern {
     pub fn matches(&self, screen: &Screen) -> bool {
         let text = screen.text();
         match self {
-            Pattern::Text(t) => text.contains(t.as_str()) || screen.text_flat().contains(t.as_str()),
+            Pattern::Text(t) => {
+                text.contains(t.as_str())
+                    || screen.text_flat().contains(t.as_str())
+                    || screen.text_unwrapped().contains(t.as_str())
+            }
             Pattern::Regex(r) => r.is_match(&text),
         }
     }
@@ -180,6 +184,21 @@ impl Screen {
     pub fn text_flat(&self) -> String {
         let joined = (0..self.rows).map(|y| self.row_text(y)).collect::<Vec<_>>().join(" ");
         joined.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Rows as text, a row filled to the last column joined to the next with
+    /// nothing in between: a line the terminal wrapped at its edge reads as
+    /// one, wherever the edge cut it (a word split at column 60).
+    pub fn text_unwrapped(&self) -> String {
+        let mut out = String::new();
+        for y in 0..self.rows {
+            out.push_str(&self.row_text(y));
+            let full = self.cols > 0 && self.cell(self.cols - 1, y).ch != " ";
+            if !full && y + 1 < self.rows {
+                out.push('\n');
+            }
+        }
+        out
     }
 
     /// The number of rows up to the last one that holds anything visible.
@@ -321,4 +340,19 @@ pub fn sgr(fg: Color, bg: Color, attrs: u8) -> String {
     }
     s.push('m');
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wait_matches_text_the_terminal_wrapped_at_its_edge() {
+        let s = escape::parse("$ printf 'build %s' comp\r\nlete\r\n$ ", 24, 3);
+        assert_eq!(s.row_text(0), "$ printf 'build %s' comp");
+        assert!(Pattern::parse("complete").unwrap().matches(&s));
+        // a short row is not continued by the next
+        let s = escape::parse("ready\r\nnow", 24, 2);
+        assert!(!Pattern::parse("readynow").unwrap().matches(&s));
+    }
 }
