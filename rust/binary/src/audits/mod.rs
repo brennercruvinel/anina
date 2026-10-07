@@ -202,7 +202,7 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>)
         variants: &outcomes,
     };
     print::write_json(&rep, &out.join("report.json"))?;
-    print::write_html(&rep, &out.join("report.html"), a.embed)?;
+    print::write_html(&rep, &out.join("report.html"))?;
     print!("{}", Redactor::shared().quiet(&print::summary(&rep)));
     if let Some(r) = anina_runner::redact::summary() {
         eprintln!("\nanina: redacted {r}");
