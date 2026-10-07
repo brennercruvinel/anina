@@ -49,6 +49,9 @@ pub struct Args {
     /// Keep the sandbox of the last run instead of starting empty
     #[arg(long)]
     pub keep: bool,
+    /// Put the images inside index.html: one file to share
+    #[arg(long)]
+    pub embed: bool,
 }
 
 /// Where anina keeps clones, builds and extracted presets.
@@ -495,7 +498,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
         changes: changes.summary(),
     };
     std::fs::write(out.join("run.json"), red.to_json(&run)?)?;
-    print::write_index(&out, &run)?;
+    print::write_index(&out, &run, a.embed)?;
     if let Some(r) = anina_runner::redact::summary() {
         say(format!("redacted {r}"));
     }
