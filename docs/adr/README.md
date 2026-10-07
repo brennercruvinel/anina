@@ -17,5 +17,6 @@ Why anina is built the way it is. `kind: decision` records a choice between opti
 | [0011](0011-a-design-system-read-from-the-screen.md) | decision | A design system read from the screen |
 | [0012](0012-one-timeline-many-writers.md) | decision | One timeline, many writers |
 | [0013](0013-a-workspace-of-layered-crates.md) | decision | Split anina into a workspace of layered crates |
+| [0014](0014-code-and-cli-speak-to-different-readers.md) | decision | The code and the CLI speak to different readers |
 
 A new ADR takes the next number, follows `TEMPLATE.md` and joins this table.

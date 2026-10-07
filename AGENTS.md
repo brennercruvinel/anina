@@ -23,6 +23,7 @@ anina drives, maps, audits and animates terminal programs. One binary, built fro
 - `rust/render/assets` and `rust/record/demo` are symlinks to `data/theme` and `demo/`. Keep them: `cargo package` needs the files inside the crate.
 - A dependency goes in `[workspace.dependencies]` first, then `name.workspace = true` in the crate that uses it.
 - Nothing about one program goes in the core; programs live in presets (ADR-0007).
+- Code names and public names differ on purpose (ADR-0014). Never rename a command, a flag, a file format or an output name to match the code; look the public name up in `docs/TERMS.toml`.
 
 ## Before a pull request
 
