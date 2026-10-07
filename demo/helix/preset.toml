@@ -1,0 +1,14 @@
+name = "helix"
+description = "helix, the modal editor: open a file, move, edit, pick another file, quit"
+homepage = "https://helix-editor.com"
+sandbox = "env"
+
+[[requires]]
+program = "hx"
+hint = "brew install helix, or see https://docs.helix-editor.com/install.html"
+
+[[parts]]
+name = "edit"
+tape = "edit.tape"
+title = "helix: select, change, pick, quit"
+about = "syntax colors, a selection, an edit, the file picker, :q!"

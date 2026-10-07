@@ -1,0 +1,14 @@
+name = "glow"
+description = "glow, Charm's markdown reader: a folder of notes, browsed and read in the terminal"
+homepage = "https://github.com/charmbracelet/glow"
+sandbox = "env"
+
+[[requires]]
+program = "glow"
+hint = "brew install glow, or go install github.com/charmbracelet/glow/v2@latest"
+
+[[parts]]
+name = "read"
+tape = "read.tape"
+title = "glow: find a note, read it, come back"
+about = "the file list, a rendered document with code and a table, scrolling, quit"
