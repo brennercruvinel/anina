@@ -1,0 +1,11 @@
+[package]
+name = "anina-motion"
+description = "Motion curves and timelines for anina animations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.release]
+tag = false

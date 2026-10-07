@@ -1,0 +1,11 @@
+[package]
+name = "anina-codecs"
+description = "Frame encoding for anina recordings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.release]
+tag = false

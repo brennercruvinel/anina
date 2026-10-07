@@ -1,0 +1,22 @@
+[package]
+name = "anina-render"
+description = "Renders anina recordings: animated SVG, PNG screenshots, galleries and themes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.release]
+tag = false
+
+[dependencies]
+anina-screen.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+clap.workspace = true
+resvg.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subsetter.workspace = true
+ttf-parser.workspace = true

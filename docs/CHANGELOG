@@ -1,0 +1,17 @@
+# Changelog
+
+## Unreleased
+
+### Changed
+
+- One crate became a workspace of nine under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary, plus `anina-codecs`, `anina-design`, `anina-motion` and `anina-recode`, empty for now. Commands, flags and output are the same.
+- Modules renamed on the way:
+  - `ansi`, `cast`, `teach` -> `anina_screen::escape`, `frames`, `lesson`
+  - `engine::tuitest`, `engine::tmux` -> `anina_runner::engine::inner`, `outer`
+  - `tape`, `volatile`, `privacy` -> `anina_runner::script`, `masker`, `redact`
+  - `render::font`, `gallery`, `png`, `svg` -> `anina_render::fonts`, `index`, `pixel`, `shape`; `brand` -> `anina_render::brand`
+  - `record` -> `anina_record`; `sandbox` (`fsdiff`) -> `anina_record::cordon` (`diffs`); `preset::manifest`, `report` -> `anina_record::preset::specs`, `print`
+  - `audit` (`contrast`, `matrix`, `measure`, `report`) -> `audits` (`ratio`, `cases`, `meter`, `print`)
+  - `explore` -> `mapper`; `init` (`keys`, `passthrough`, `tapegen`) -> `taping` (`input`, `relay`, `print`); `check` -> `checks`
+- `presets/` is `demo/`. The CI workflow is `gatecheck.yml`.
+- Releases are tagged `v{{version}}` for the whole workspace.

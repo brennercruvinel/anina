@@ -1,0 +1,32 @@
+[package]
+name = "anina"
+description = "Drive, map, audit and animate any terminal app. No AI required."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["tui", "terminal", "testing", "svg", "demo"]
+categories = ["command-line-utilities", "development-tools::testing"]
+
+[[bin]]
+name = "anina"
+path = "src/main.rs"
+
+[[test]]
+name = "leaks"
+path = "../../tool/tests/leaks.rs"
+
+[dependencies]
+anina-screen.workspace = true
+anina-runner.workspace = true
+anina-render.workspace = true
+anina-record.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+flate2.workspace = true
+libc.workspace = true
+regex.workspace = true
+serde.workspace = true

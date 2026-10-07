@@ -1,0 +1,11 @@
+[package]
+name = "anina-recode"
+description = "Converts anina recordings between formats."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.release]
+tag = false

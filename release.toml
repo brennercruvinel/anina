@@ -1,0 +1,10 @@
+# cargo-release only bumps the version on a release-* branch.
+# push and publish stay by hand.
+allow-branch = ["release-*"]
+publish = false
+push = false
+
+# one version for the whole workspace, one tag for it: v0.1.0, not
+# anina-v0.1.0. the inner crates set `tag = false` in their manifest.
+shared-version = true
+tag-name = "v{{version}}"
