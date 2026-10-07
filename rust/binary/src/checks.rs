@@ -1,8 +1,9 @@
 //! `anina check`: look through what anina wrote before it goes anywhere. Every
 //! text file (casts inside their gzip too) is searched for what redaction
 //! hides: this machine's home path, user, host and git identity, secret
-//! shapes, and the `[redact]` rules of the config. PNGs are pixels and are
-//! skipped; their SVG and text twins are checked instead.
+//! shapes, and the `[redact]` rules of the config. A PNG is read through the
+//! text chunks anina writes into it (the screen it shows); a PNG without
+//! text is only pixels, and the summary counts it apart.
 
 use anina_runner::redact::Redactor;
 use anyhow::{Result, bail};
@@ -31,26 +32,49 @@ pub struct Finding {
 
 pub fn run(a: Args) -> Result<()> {
     let paths = if a.paths.is_empty() { vec![PathBuf::from("anina-out")] } else { a.paths };
+    check(&paths)
+}
+
+/// Check what a command just wrote, before it reports success.
+pub fn verify(out: &Path) -> Result<()> {
+    check(&[out.to_path_buf()])
+}
+
+fn check(paths: &[PathBuf]) -> Result<()> {
     let red = Redactor::shared();
-    let (mut files, mut skipped, mut found) = (0, 0, Vec::new());
-    for p in &paths {
+    let (mut files, mut pngs, mut blind, mut skipped, mut found) = (0, 0, 0, 0, Vec::new());
+    for p in paths {
         if !p.exists() {
             bail!("{} does not exist", p.display());
         }
         for f in walk(p) {
-            match read_text(&f)? {
-                Some(text) => {
+            match read(&f)? {
+                Content::Text(text) => {
                     files += 1;
                     found.extend(scan(&f, &text, red));
                 }
-                None => skipped += 1,
+                Content::Png(text) => {
+                    pngs += 1;
+                    found.extend(scan(&f, &text, red));
+                }
+                Content::Pixels => blind += 1,
+                Content::Binary => skipped += 1,
             }
         }
     }
     for f in &found {
         println!("{}:{}: {}: {}", f.file.display(), f.line, f.label, f.context);
     }
-    let checked = format!("{files} files checked, {skipped} binary skipped");
+    let mut checked = format!("{files} files checked");
+    if pngs > 0 {
+        checked.push_str(&format!(", {pngs} PNG read through their screen text"));
+    }
+    if blind > 0 {
+        checked.push_str(&format!(", {blind} PNG with no text, not checked"));
+    }
+    if skipped > 0 {
+        checked.push_str(&format!(", {skipped} binary skipped"));
+    }
     if found.is_empty() {
         eprintln!("anina check: nothing to hide ({checked})");
         return Ok(());
@@ -106,18 +130,95 @@ fn walk(p: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// A file's text (gunzipped when it is gzip), or None for binary files.
-fn read_text(p: &Path) -> Result<Option<String>> {
+/// What a file holds, as far as `check` can read it.
+#[derive(Debug, PartialEq)]
+enum Content {
+    /// Text, gunzipped when it was gzip.
+    Text(String),
+    /// A PNG's text chunks, one per line.
+    Png(String),
+    /// A PNG with no text chunk.
+    Pixels,
+    Binary,
+}
+
+fn read(p: &Path) -> Result<Content> {
     let mut bytes = std::fs::read(p)?;
+    if bytes.starts_with(PNG_SIGNATURE) {
+        let text = png_text(&bytes);
+        return Ok(if text.is_empty() { Content::Pixels } else { Content::Png(text) });
+    }
     if bytes.starts_with(&[0x1f, 0x8b]) {
         let mut out = Vec::new();
         flate2::read::GzDecoder::new(&bytes[..]).read_to_end(&mut out)?;
         bytes = out;
     }
     if bytes.iter().take(8192).any(|b| *b == 0) {
-        return Ok(None);
+        return Ok(Content::Binary);
     }
-    Ok(String::from_utf8(bytes).ok())
+    Ok(String::from_utf8(bytes).map_or(Content::Binary, Content::Text))
+}
+
+pub const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// A PNG's chunks as (kind, data), in order, up to IEND or the first one
+/// that runs past the end. Empty when `png` is not a PNG.
+pub fn png_chunks(png: &[u8]) -> Vec<(&[u8], &[u8])> {
+    let mut out = Vec::new();
+    if !png.starts_with(PNG_SIGNATURE) {
+        return out;
+    }
+    let mut at = PNG_SIGNATURE.len();
+    while at + 12 <= png.len() {
+        let len = u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]) as usize;
+        let kind = &png[at + 4..at + 8];
+        let Some(data) = png.get(at + 8..at + 8 + len) else { break };
+        out.push((kind, data));
+        if kind == b"IEND" {
+            break;
+        }
+        at += 12 + len;
+    }
+    out
+}
+
+/// The text of every tEXt, zTXt and iTXt chunk of a PNG, joined by lines.
+/// A chunk that does not parse is left out; the rest still counts.
+fn png_text(png: &[u8]) -> String {
+    let text: Vec<String> = png_chunks(png)
+        .into_iter()
+        .filter_map(|(kind, data)| match kind {
+            b"tEXt" => data.splitn(2, |b| *b == 0).nth(1).map(latin1),
+            b"zTXt" => {
+                data.splitn(2, |b| *b == 0).nth(1).and_then(|r| r.get(1..)).and_then(inflate).map(|b| latin1(&b))
+            }
+            b"iTXt" => itxt(data),
+            _ => None,
+        })
+        .collect();
+    text.join("\n")
+}
+
+/// keyword NUL flag method language NUL translated NUL text
+fn itxt(data: &[u8]) -> Option<String> {
+    let mut parts = data.splitn(2, |b| *b == 0);
+    parts.next()?;
+    let rest = parts.next()?;
+    let (flag, rest) = (*rest.first()?, rest.get(2..)?);
+    let mut fields = rest.splitn(3, |b| *b == 0);
+    let (_lang, _translated, text) = (fields.next()?, fields.next()?, fields.next()?);
+    let text = if flag == 1 { inflate(text)? } else { text.to_vec() };
+    String::from_utf8(text).ok()
+}
+
+fn inflate(z: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    flate2::read::ZlibDecoder::new(z).read_to_end(&mut out).ok()?;
+    Some(out)
+}
+
+fn latin1(b: &[u8]) -> String {
+    b.iter().map(|&c| c as char).collect()
 }
 
 #[cfg(test)]
@@ -154,10 +255,26 @@ mod tests {
         let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         e.write_all(b"{\"tape\":\"/Users/alice/t\"}").unwrap();
         std::fs::write(&gz, e.finish().unwrap()).unwrap();
-        assert_eq!(read_text(&gz).unwrap().as_deref(), Some("{\"tape\":\"/Users/alice/t\"}"));
+        assert_eq!(read(&gz).unwrap(), Content::Text("{\"tape\":\"/Users/alice/t\"}".into()));
         let png = dir.join("a.png");
         std::fs::write(&png, b"\x89PNG\r\n\x1a\n\0\0\0").unwrap();
-        assert_eq!(read_text(&png).unwrap(), None);
+        assert_eq!(read(&png).unwrap(), Content::Pixels);
+        let bin = dir.join("a.bin");
+        std::fs::write(&bin, b"\0\x01\x02").unwrap();
+        assert_eq!(read(&bin).unwrap(), Content::Binary);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_png_is_read_through_its_screen_text() {
+        let dir = std::env::temp_dir().join(format!("anina-check-png-{}", std::process::id()));
+        let png = dir.join("s.png");
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#123"/></svg>"##;
+        anina_render::pixel::svg_to_png_with_text(svg, &png, 1.0, Some("shell\n$ ls /Users/alice")).unwrap();
+        let Content::Png(text) = read(&png).unwrap() else { panic!("not read as a png with text") };
+        let f = scan(&png, &text, &red());
+        assert_eq!(f.len(), 1, "{text}");
+        assert_eq!(f[0].label, "home path");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

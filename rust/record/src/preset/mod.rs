@@ -189,7 +189,8 @@ fn missing_needs<'a>(needs: &'a [String], vars: &HashMap<String, String>) -> Vec
     needs.iter().filter(|n| vars.get(*n).is_none_or(|v| v.is_empty())).map(|s| s.as_str()).collect()
 }
 
-pub fn run(a: Args) -> Result<()> {
+/// Run a preset; returns the output directory.
+pub fn run(a: Args) -> Result<PathBuf> {
     let dir = std::fs::canonicalize(resolve(&a.preset)?)?;
     let m = Manifest::load(&dir)?;
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
@@ -392,5 +393,5 @@ pub fn run(a: Args) -> Result<()> {
     if !failed.is_empty() {
         bail!("{} part(s) failed: {}", failed.len(), failed.join(", "));
     }
-    Ok(())
+    Ok(out)
 }
