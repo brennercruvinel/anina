@@ -41,6 +41,9 @@ pub struct Args {
     /// With --preset: sandbox mode over the preset's: off, env, strict
     #[arg(long, requires = "preset")]
     pub sandbox: Option<String>,
+    /// Put the screenshots inside report.html: one file to share
+    #[arg(long)]
+    pub embed: bool,
     /// Output directory (default: anina-out/audit-<name>)
     #[arg(short, long)]
     pub out: Option<PathBuf>,
@@ -199,7 +202,7 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>)
         variants: &outcomes,
     };
     print::write_json(&rep, &out.join("report.json"))?;
-    print::write_html(&rep, &out.join("report.html"))?;
+    print::write_html(&rep, &out.join("report.html"), a.embed)?;
     print!("{}", Redactor::shared().quiet(&print::summary(&rep)));
     if let Some(r) = anina_runner::redact::summary() {
         eprintln!("\nanina: redacted {r}");
