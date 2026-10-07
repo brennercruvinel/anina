@@ -143,7 +143,7 @@ pub fn run(a: Args) -> Result<()> {
         eprintln!("\nanina: redacted {r}");
     }
     eprintln!("\nanina: report -> {}", anina_screen::lesson::shown(&out.join("report.html")));
-    Ok(())
+    crate::checks::verify(&out)
 }
 
 /// How a bare command behaves on its own: whether it exits by itself, and

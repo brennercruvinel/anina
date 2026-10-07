@@ -533,7 +533,8 @@ pub struct Args {
     pub vars: Vec<String>,
 }
 
-pub fn run(a: Args) -> Result<()> {
+/// Record a tape; returns the output directory.
+pub fn run(a: Args) -> Result<PathBuf> {
     let name = a.tape.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned());
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
     std::fs::create_dir_all(&out)?;
@@ -580,5 +581,5 @@ pub fn run(a: Args) -> Result<()> {
         anina_render::shape::write_cast_svg(&rec.cast, a.theme.as_deref(), &svg)?;
         eprintln!("anina: svg -> {}", anina_screen::lesson::shown(&svg));
     }
-    Ok(())
+    Ok(out)
 }

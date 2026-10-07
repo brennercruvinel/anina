@@ -61,9 +61,9 @@ fn main() {
 fn dispatch(cmd: Cmd) -> Result<()> {
     redact::init()?;
     match cmd {
-        Cmd::Run(a) => preset::run(a),
+        Cmd::Run(a) => preset::run(a).and_then(|out| checks::verify(&out)),
         Cmd::Presets => preset::list(),
-        Cmd::Record(a) => record::run(a),
+        Cmd::Record(a) => record::run(a).and_then(|out| checks::verify(&out)),
         Cmd::Render(a) => render::run(a),
         Cmd::Explore(a) => mapper::run(a),
         Cmd::Init(a) => taping::run(a),

@@ -957,5 +957,5 @@ pub fn run(a: Args) -> Result<()> {
         std::fs::write(&p, tape)?;
         eprintln!("anina explore: s{target} shows {want:?}; the way there -> {}", anina_screen::lesson::shown(&p));
     }
-    Ok(())
+    crate::checks::verify(&out)
 }
