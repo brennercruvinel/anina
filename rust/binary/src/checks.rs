@@ -57,8 +57,17 @@ fn check(paths: &[PathBuf]) -> Result<()> {
     check_since(paths, None)
 }
 
+/// Did the file change since `since`? By its status-change time (ctime),
+/// not its mtime: `cp -p`, `rsync -a`, `tar x`, `mv` and a clone keep the
+/// old mtime, but every one of them sets the ctime, and no program can set
+/// it back.
 fn written_since(f: &Path, since: Option<SystemTime>) -> bool {
-    since.is_none_or(|t| std::fs::metadata(f).and_then(|m| m.modified()).is_ok_and(|m| m >= t))
+    use std::os::unix::fs::MetadataExt;
+    let Some(t) = since else { return true };
+    let Ok(m) = std::fs::metadata(f) else { return true };
+    let changed =
+        SystemTime::UNIX_EPOCH + Duration::new(m.ctime().max(0) as u64, m.ctime_nsec().clamp(0, 999_999_999) as u32);
+    changed >= t
 }
 
 fn check_since(paths: &[PathBuf], since: Option<SystemTime>) -> Result<()> {
@@ -257,13 +266,15 @@ mod tests {
     fn verify_reads_what_was_written_since_the_start_only() {
         let dir = std::env::temp_dir().join(format!("anina-since-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let (old, new) = (dir.join("note.md"), dir.join("run.json"));
+        let (old, copied) = (dir.join("note.md"), dir.join("copied.md"));
         std::fs::write(&old, "/Users/alice").unwrap();
-        std::fs::write(&new, "{}").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        let since = Some(SystemTime::now());
+        // a copy that keeps the old mtime (cp -p, rsync -a, tar x) still counts
         let hour_ago = SystemTime::now() - Duration::from_secs(3600);
-        std::fs::File::options().write(true).open(&old).unwrap().set_modified(hour_ago).unwrap();
-        let since = Some(SystemTime::now() - Duration::from_secs(60));
-        assert!(!written_since(&old, since) && written_since(&new, since));
+        std::fs::copy(&old, &copied).unwrap();
+        std::fs::File::options().write(true).open(&copied).unwrap().set_modified(hour_ago).unwrap();
+        assert!(!written_since(&old, since) && written_since(&copied, since));
         assert!(written_since(&old, None));
         let _ = std::fs::remove_dir_all(&dir);
     }
