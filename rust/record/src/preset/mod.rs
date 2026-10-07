@@ -18,6 +18,7 @@ use anina_runner::script::{Tape, expand};
 use anyhow::{Context, Result, anyhow, bail};
 use include_dir::{Dir, include_dir};
 use specs::Manifest;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -212,6 +213,10 @@ pub struct Stage {
     pub vars: HashMap<String, String>,
     pub red: Redactor,
     pub theme: String,
+    /// The sandbox as `freeze` or the last `restore` left it, and whether no
+    /// play has touched it since.
+    base: RefCell<Snapshot>,
+    fresh: Cell<bool>,
 }
 
 /// What `stage` needs from the command line.
@@ -247,7 +252,7 @@ impl Stage {
         // in the cache, not in the output: installs weigh hundreds of MB
         let root = cache_dir().join("sandbox").join(a.slot.unwrap_or(&m.name));
         if !a.keep && root.exists() {
-            std::fs::remove_dir_all(&root).with_context(|| format!("emptying {}", root.display()))?;
+            remove_tree(&root).with_context(|| format!("emptying {}", root.display()))?;
         }
         let sb = Sandbox::new(&root, mode)?;
 
@@ -310,7 +315,17 @@ impl Stage {
         }
 
         let theme = m.theme.as_ref().map(|t| dir.join(t).display().to_string()).unwrap_or_default();
-        Ok(Stage { dir, manifest: m, mode, sandbox: sb, vars, red, theme })
+        Ok(Stage {
+            dir,
+            manifest: m,
+            mode,
+            sandbox: sb,
+            vars,
+            red,
+            theme,
+            base: RefCell::default(),
+            fresh: Cell::new(false),
+        })
     }
 
     /// The variables `part` still misses, empty when it can run.
@@ -350,40 +365,108 @@ impl Stage {
     /// play from the same state with `restore`.
     pub fn freeze(&self) -> Result<()> {
         let to = self.pristine();
-        let _ = std::fs::remove_dir_all(&to);
-        copy_tree(&self.sandbox.root, &to).with_context(|| format!("saving {}", to.display()))
+        remove_tree(&to)?;
+        copy_tree(&self.sandbox.root, &to).with_context(|| format!("saving {}", to.display()))?;
+        self.base.replace(Snapshot::take(&self.sandbox.root));
+        self.fresh.set(true);
+        Ok(())
     }
 
-    /// Put the sandbox back as `freeze` left it.
+    /// Put the sandbox back as `freeze` left it. Nothing to do before the
+    /// first play; after one, only the paths it changed are put back (an
+    /// install of hundreds of MB stays where it is), and the whole tree is
+    /// copied again only when that fails.
     pub fn restore(&self) -> Result<()> {
+        if self.fresh.replace(false) {
+            return Ok(());
+        }
         let root = &self.sandbox.root;
-        std::fs::remove_dir_all(root).with_context(|| format!("emptying {}", root.display()))?;
-        copy_tree(&self.pristine(), root).with_context(|| format!("restoring {}", root.display()))
+        let now = Snapshot::take(root);
+        let changed = self.base.borrow().differs(&now);
+        if let Err(e) = self.put_back(&changed) {
+            eprintln!("anina: restoring {} path(s) failed ({e}); copying the whole sandbox", changed.len());
+            remove_tree(root).with_context(|| format!("emptying {}", root.display()))?;
+            copy_tree(&self.pristine(), root).with_context(|| format!("restoring {}", root.display()))?;
+        }
+        self.base.replace(Snapshot::take(root));
+        Ok(())
+    }
+
+    /// Each path as `freeze` saved it: gone when it did not exist then.
+    fn put_back(&self, paths: &[String]) -> std::io::Result<()> {
+        let (root, saved) = (&self.sandbox.root, self.pristine());
+        for p in paths {
+            let (now, then) = (root.join(p), saved.join(p));
+            match std::fs::symlink_metadata(&now) {
+                Ok(md) if md.is_dir() => remove_tree(&now)?,
+                Ok(_) => std::fs::remove_file(&now)?,
+                Err(_) => {}
+            }
+            let Ok(md) = std::fs::symlink_metadata(&then) else { continue };
+            copy_entry(&then, &now, md.file_type())?;
+        }
+        Ok(())
     }
 }
 
 impl Drop for Stage {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(self.pristine());
+        let _ = remove_tree(&self.pristine());
     }
 }
 
-/// Copy a directory tree, symlinks as symlinks.
+/// Copy a directory tree: symlinks as symlinks, folders with their
+/// permissions. Sockets, FIFOs and devices are left out: they belong to the
+/// process that made them (an agent, a language server), not to the state.
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from)? {
         let e = e?;
-        let (src, dst) = (e.path(), to.join(e.file_name()));
-        let t = e.file_type()?;
-        if t.is_symlink() {
-            std::os::unix::fs::symlink(std::fs::read_link(&src)?, &dst)?;
-        } else if t.is_dir() {
-            copy_tree(&src, &dst)?;
-        } else {
-            std::fs::copy(&src, &dst)?;
-        }
+        copy_entry(&e.path(), &to.join(e.file_name()), e.file_type()?)?;
     }
-    Ok(())
+    std::fs::set_permissions(to, std::fs::metadata(from)?.permissions())
+}
+
+fn copy_entry(src: &Path, dst: &Path, t: std::fs::FileType) -> std::io::Result<()> {
+    use std::os::unix::fs::FileTypeExt;
+    if t.is_symlink() {
+        std::os::unix::fs::symlink(std::fs::read_link(src)?, dst)
+    } else if t.is_dir() {
+        copy_tree(src, dst)
+    } else if t.is_socket() || t.is_fifo() || t.is_block_device() || t.is_char_device() {
+        Ok(())
+    } else {
+        std::fs::copy(src, dst).map(|_| ())
+    }
+}
+
+/// Remove a tree, read-only folders included (Go's module cache is one):
+/// a folder without write permission cannot be emptied, so it gets it back.
+fn remove_tree(p: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(p) {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            writable(p);
+            std::fs::remove_dir_all(p)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        r => r,
+    }
+}
+
+/// Give every folder under `dir` (itself included) back its owner's write
+/// and search bits.
+fn writable(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(md) = std::fs::symlink_metadata(dir) else { return };
+    if !md.is_dir() {
+        return;
+    }
+    let mut perm = md.permissions();
+    perm.set_mode(perm.mode() | 0o700);
+    let _ = std::fs::set_permissions(dir, perm);
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        writable(&e.path());
+    }
 }
 
 /// Run a preset; returns the output directory.
@@ -499,4 +582,37 @@ pub fn run(a: Args) -> Result<PathBuf> {
         bail!("{} part(s) failed: {}", failed.len(), failed.join(", "));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_tree_with_sockets_fifos_and_read_only_folders_copies_and_goes() {
+        let dir = std::env::temp_dir().join(format!("anina-tree-{}", std::process::id()));
+        let _ = remove_tree(&dir);
+        let (from, to) = (dir.join("from"), dir.join("to"));
+        std::fs::create_dir_all(from.join("pkg/mod/x@v1")).unwrap();
+        std::fs::write(from.join("pkg/mod/x@v1/go.mod"), "module x").unwrap();
+        let _sock = std::os::unix::net::UnixListener::bind(from.join("agent.sock")).unwrap();
+        assert!(std::process::Command::new("mkfifo").arg(from.join("pipe")).status().unwrap().success());
+        std::os::unix::fs::symlink("pkg", from.join("link")).unwrap();
+        for d in ["pkg/mod/x@v1", "pkg/mod"] {
+            std::fs::set_permissions(from.join(d), std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
+
+        copy_tree(&from, &to).unwrap();
+        assert_eq!(std::fs::read_to_string(to.join("pkg/mod/x@v1/go.mod")).unwrap(), "module x");
+        assert!(std::fs::symlink_metadata(to.join("link")).unwrap().file_type().is_symlink());
+        assert!(!to.join("agent.sock").exists() && !to.join("pipe").exists());
+        let mode = std::fs::metadata(to.join("pkg/mod")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o555);
+
+        assert!(std::fs::remove_dir_all(&to).is_err());
+        remove_tree(&to).unwrap();
+        remove_tree(&dir).unwrap();
+        assert!(!dir.exists());
+    }
 }
