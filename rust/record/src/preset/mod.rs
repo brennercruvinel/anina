@@ -105,6 +105,15 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
     bail!("no preset {name:?}; known: {}", known.join(", "))
 }
 
+/// A preset found and read, once per run: its folder (absolute) and manifest.
+/// A built-in preset is extracted to the cache on every lookup, so a run
+/// looks it up here and hands the result on.
+pub fn load(name: &str) -> Result<(PathBuf, Manifest)> {
+    let dir = std::fs::canonicalize(resolve(name)?)?;
+    let m = Manifest::load(&dir)?;
+    Ok((dir, m))
+}
+
 /// A built-in folder is a preset only with its manifest; `demo/` also keeps
 /// empty folders for presets still to come.
 fn is_builtin(d: &Dir) -> bool {
@@ -207,7 +216,6 @@ pub struct Stage {
 
 /// What `stage` needs from the command line.
 pub struct StageArgs<'a> {
-    pub preset: &'a str,
     pub out: &'a Path,
     pub sandbox: Option<&'a str>,
     pub vars: &'a [String],
@@ -219,9 +227,8 @@ pub struct StageArgs<'a> {
 }
 
 impl Stage {
-    pub fn new(a: &StageArgs) -> Result<Stage> {
-        let dir = std::fs::canonicalize(resolve(a.preset)?)?;
-        let m = Manifest::load(&dir)?;
+    /// Stage the preset `load` returned.
+    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs) -> Result<Stage> {
         let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
 
         // what the machine must have
@@ -306,26 +313,6 @@ impl Stage {
         Ok(Stage { dir, manifest: m, mode, sandbox: sb, vars, red, theme })
     }
 
-    /// The parts named in `names`, or every part when it is empty.
-    pub fn parts(&self, names: &[String]) -> Result<Vec<&specs::Part>> {
-        let m = &self.manifest;
-        if names.is_empty() {
-            return Ok(m.parts.iter().collect());
-        }
-        names
-            .iter()
-            .map(|p| {
-                m.parts.iter().find(|x| &x.name == p).ok_or_else(|| {
-                    anyhow!(
-                        "{} has no part {p:?}; parts: {}",
-                        m.name,
-                        m.parts.iter().map(|x| x.name.as_str()).collect::<Vec<_>>().join(", ")
-                    )
-                })
-            })
-            .collect()
-    }
-
     /// The variables `part` still misses, empty when it can run.
     pub fn gaps<'a>(&self, part: &'a specs::Part) -> Vec<&'a str> {
         missing_needs(&part.needs, &self.vars)
@@ -401,23 +388,27 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Run a preset; returns the output directory.
 pub fn run(a: Args) -> Result<PathBuf> {
-    let name = Manifest::load(&resolve(&a.preset)?)?.name;
-    let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
+    let (dir, m) = load(&a.preset)?;
+    m.pick(&a.part)?;
+    let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
     let started = Instant::now();
-    let stage = Stage::new(&StageArgs {
-        preset: &a.preset,
-        out: &out,
-        sandbox: a.sandbox.as_deref(),
-        vars: &a.vars,
-        redact: &a.redact,
-        keep: a.keep,
-        slot: None,
-    })?;
+    let stage = Stage::new(
+        dir,
+        m,
+        &StageArgs {
+            out: &out,
+            sandbox: a.sandbox.as_deref(),
+            vars: &a.vars,
+            redact: &a.redact,
+            keep: a.keep,
+            slot: None,
+        },
+    )?;
     let (m, sb, red) = (&stage.manifest, &stage.sandbox, &stage.red);
     let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
-    let parts = stage.parts(&a.part)?;
+    let parts = m.pick(&a.part)?;
 
     let before = Snapshot::take(&sb.root);
     let mut results = Vec::new();
