@@ -459,7 +459,7 @@ pub fn record(tape: &Tape, base: Config, opts: Options) -> Result<Recording> {
     let mut result = Ok(());
     for line in &tape.lines {
         if let Err(e) = r.step(&line.step) {
-            result = Err(e.context(format!("{}:{}", line.file.display(), line.n)));
+            result = Err(e.context(format!("{}:{}", anina_screen::lesson::shown(&line.file), line.n)));
             break;
         }
     }
@@ -559,7 +559,12 @@ pub fn run(a: Args) -> Result<()> {
     }
     let cast_path = out.join(format!("{name}.cast.json.gz"));
     rec.cast.save(&cast_path)?;
-    eprintln!("anina: {} frames, {} screens -> {}", rec.cast.frames.len(), rec.cast.screens.len(), cast_path.display());
+    eprintln!(
+        "anina: {} frames, {} screens -> {}",
+        rec.cast.frames.len(),
+        rec.cast.screens.len(),
+        anina_screen::lesson::shown(&cast_path)
+    );
     if let Some(r) = anina_runner::redact::summary() {
         eprintln!("anina: redacted {r}");
     }
@@ -567,13 +572,13 @@ pub fn run(a: Args) -> Result<()> {
         let p = out.join(Path::new(&o).file_name().unwrap_or_default());
         if o.ends_with(".cast") {
             std::fs::write(&p, rec.cast.to_asciicast())?;
-            eprintln!("anina: asciicast -> {}", p.display());
+            eprintln!("anina: asciicast -> {}", anina_screen::lesson::shown(&p));
         }
     }
     if !a.no_render {
         let svg = out.join(format!("{name}.svg"));
         anina_render::shape::write_cast_svg(&rec.cast, a.theme.as_deref(), &svg)?;
-        eprintln!("anina: svg -> {}", svg.display());
+        eprintln!("anina: svg -> {}", anina_screen::lesson::shown(&svg));
     }
     Ok(())
 }

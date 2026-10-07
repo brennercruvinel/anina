@@ -310,7 +310,7 @@ pub fn run(a: Args) -> Result<()> {
             results.push(print::PartResult::skipped(part, &title, format!("needs {}", gaps.join(", "))));
             continue;
         }
-        say(format!("part {}/{} {} — {title}", i + 1, parts.len(), part.name));
+        say(format!("part {}/{} {} · {title}", i + 1, parts.len(), part.name));
         let pdir = out.join(&part.name);
         let _ = std::fs::remove_dir_all(&pdir);
         std::fs::create_dir_all(&pdir)?;
@@ -362,7 +362,7 @@ pub fn run(a: Args) -> Result<()> {
                 results.push(print::PartResult::ok(part, &title, &rec, secs, svg_ok));
             }
             Err(e) => {
-                say(format!("  FAILED after {secs:.1}s: {e:#}"));
+                say(format!("  FAILED after {secs:.1}s: {}", red.quiet(&format!("{e:#}"))));
                 results.push(print::PartResult::failed(part, &title, red.text(&format!("{e:#}")), secs));
             }
         }
@@ -387,7 +387,7 @@ pub fn run(a: Args) -> Result<()> {
     if let Some(r) = anina_runner::redact::summary() {
         say(format!("redacted {r}"));
     }
-    say(format!("-> {}", out.join("index.html").display()));
+    say(format!("-> {}", anina_screen::lesson::shown(&out.join("index.html"))));
     let failed: Vec<&str> = run.parts.iter().filter(|p| p.status == "failed").map(|p| p.name.as_str()).collect();
     if !failed.is_empty() {
         bail!("{} part(s) failed: {}", failed.len(), failed.join(", "));

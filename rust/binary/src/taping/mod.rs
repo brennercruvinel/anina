@@ -72,8 +72,13 @@ pub fn run(a: Args) -> Result<()> {
     }
     std::fs::write(&out, &tape)?;
     let steps = tape.lines().filter(|l| !l.starts_with('#') && !l.starts_with("Set ")).count();
-    eprintln!("anina init: {} inputs -> {} steps in {}", session.inputs.len(), steps, out.display());
-    eprintln!("anina init: replay with: anina record {}", out.display());
+    eprintln!(
+        "anina init: {} inputs -> {} steps in {}",
+        session.inputs.len(),
+        steps,
+        anina_screen::lesson::shown(&out)
+    );
+    eprintln!("anina init: replay with: anina record {}", anina_screen::lesson::shown(&out));
     Ok(())
 }
 
