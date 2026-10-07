@@ -1,0 +1,22 @@
+[package]
+name = "anina-runner"
+description = "Runs a terminal program for anina: engines, the tape language, masking and redaction."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata.release]
+tag = false
+
+[dependencies]
+anina-screen.workspace = true
+anyhow.workspace = true
+libc.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tui-test-rs.workspace = true
+unicode-width.workspace = true

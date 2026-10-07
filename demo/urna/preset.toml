@@ -1,0 +1,87 @@
+name = "urna"
+description = "urna, the single-file vector database: urna setup on an empty machine, then the urna tui explorer"
+homepage = "https://urna.dev"
+sandbox = "env"
+theme = "theme.json"
+network = true
+
+[[requires]]
+program = "curl"
+hint = "the installer downloads the release with curl"
+
+[[vars]]
+name = "URNA_BIN"
+default = "${HOME_DIR}/.local/bin"
+about = "where the urna binary is; the released one is installed there when missing"
+
+[[vars]]
+name = "URNA_INSTALLER"
+default = ""
+about = "a bootstrap installer script (URL or file); empty = the released binary from the latest GitHub release"
+
+[[vars]]
+name = "URNA_HOME"
+default = "${HOME_DIR}"
+about = "the HOME urna setup installs into and urna tui reads (the sandbox's by default)"
+
+[[vars]]
+name = "URNA_REPO"
+default = ""
+about = "an urna checkout; the tui part builds its starter corpus from it"
+
+[[vars]]
+name = "URNA_CORPUS_DIR"
+default = "${WORK}"
+about = "a folder with quickstart.urna for the tui part (built from URNA_REPO when missing)"
+
+[[prepare]]
+about = "install the released urna binary"
+run = """
+if [ -z "$URNA_INSTALLER" ]; then
+  # the release asset URL is stable; script paths in the repo move
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) t=aarch64-apple-darwin ;;
+    Darwin-x86_64) t=x86_64-apple-darwin ;;
+    Linux-aarch64|Linux-arm64) t=aarch64-unknown-linux-musl ;;
+    Linux-x86_64) t=x86_64-unknown-linux-musl ;;
+    *) echo "no urna release for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+  esac
+  curl -fsSL "https://github.com/hoffresearch/urna/releases/latest/download/urna-$t.tar.xz" | tar -xJ -C "$TMP_DIR"
+  mkdir -p "$URNA_BIN" && cp "$TMP_DIR/urna-$t/urna" "$URNA_BIN/urna" && chmod +x "$URNA_BIN/urna"
+else
+  case "$URNA_INSTALLER" in
+    http*) curl -fsSL "$URNA_INSTALLER" -o "$TMP_DIR/installer.sh" ;;
+    *) cp "$URNA_INSTALLER" "$TMP_DIR/installer.sh" ;;
+  esac
+  HOME="$HOME_DIR" URNA_BIN_DIR="$URNA_BIN" sh "$TMP_DIR/installer.sh"
+fi
+"""
+creates = "${URNA_BIN}/urna"
+
+[[prepare]]
+about = "build the starter corpus (12 chunks) from the checkout"
+run = """
+bin="$URNA_REPO/target/release/urna"
+[ -x "$bin" ] || bin="$URNA_BIN/urna"
+cd "$URNA_REPO" && "$bin" build --spec demo/starter/corpus.toml --out-dir "$URNA_CORPUS_DIR" > /dev/null
+"""
+creates = "${URNA_CORPUS_DIR}/quickstart.urna"
+needs = ["URNA_REPO"]
+
+[[parts]]
+name = "setup"
+tape = "setup.tape"
+title = "urna setup: from an empty machine to the doctor checks"
+about = "splash, scan, plan, the offline embedder payload, the python env, verify"
+
+[[parts]]
+name = "cli"
+tape = "cli.tape"
+title = "urna cli: inspect, validate, search, ask, retrieve, doctor"
+about = "every everyday verb on the starter corpus, one screenshot each"
+
+[[parts]]
+name = "tui"
+tape = "tui.tape"
+title = "urna tui: open a corpus, ask it, read the cited answer"
+about = "home, open, ask, the hits with their citations, health, quit"
