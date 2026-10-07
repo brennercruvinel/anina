@@ -31,6 +31,8 @@ Caption "4 · ctrl+j runs it: three programs, ranked"
 Key C-j
 Wait "3 Records"
 Wait "executed successfully"
+# the proof: helix's downloads summed from the CSV (9,120 + 8,790 + 9,301)
+Wait "27,211"
 Sleep 1.8
 Poster
 Snap 04-results

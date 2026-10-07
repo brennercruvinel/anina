@@ -53,3 +53,5 @@ Type ":wq" 0.12
 Sleep 0.6
 Key Enter
 Sleep 0.8
+# the proof: the change is on disk, not only on screen
+Exec grep -q 'welcome, {name}' "$WORK/greeter/src/main.rs"
