@@ -1,0 +1,6 @@
+# cargo-release only bumps the version on a release-* branch.
+# commit, tag, push and publish stay by hand.
+allow-branch = ["release-*"]
+publish = false
+push = false
+tag = false

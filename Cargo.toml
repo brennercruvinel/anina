@@ -11,6 +11,17 @@ keywords = ["tui", "terminal", "testing", "svg", "demo"]
 categories = ["command-line-utilities", "development-tools::testing"]
 exclude = ["docs/demos/*", ".github/*"]
 
+[lib]
+path = "rust/lib.rs"
+
+[[bin]]
+name = "anina"
+path = "rust/main.rs"
+
+[[test]]
+name = "leaks"
+path = "tool/tests/leaks.rs"
+
 [dependencies]
 anyhow = "1.0.104"
 base64 = "0.23.1"

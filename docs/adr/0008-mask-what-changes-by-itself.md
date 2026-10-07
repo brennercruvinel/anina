@@ -9,14 +9,14 @@ last-updated: 2026-10-06
 tags: [volatile, determinism, explore]
 supersedes: []
 superseded-by: null
-related: [src/volatile.rs, src/explore]
+related: [rust/volatile.rs, rust/explore]
 ---
 
 # ADR-0008: Mask the cells that change by themselves
 
 ## Context
 
-Many screens never stand still: urna's hash rain and breathing logo, spinners, clocks, elapsed times, create-astro's random project name, burn's live plots. "Has the screen changed?" and "is this the same screen?" give wrong answers on them, which breaks idle waits, screen maps and comparisons between runs.
+Many screens never stand still: anina's hash rain and breathing logo, spinners, clocks, elapsed times, create-astro's random project name, burn's live plots. "Has the screen changed?" and "is this the same screen?" give wrong answers on them, which breaks idle waits, screen maps and comparisons between runs.
 
 ## Decision drivers
 
@@ -25,7 +25,7 @@ Many screens never stand still: urna's hash rain and breathing logo, spinners, c
 
 ## Decision
 
-Watch a screen while nobody types; the cells that change form its volatile mask (`src/volatile.rs`). Hashes, idle waits and state identity skip masked cells. The mask is learned per state and grows across visits.
+Watch a screen while nobody types; the cells that change form its volatile mask (`rust/volatile.rs`). Hashes, idle waits and state identity skip masked cells. The mask is learned per state and grows across visits.
 
 ## Consequences
 

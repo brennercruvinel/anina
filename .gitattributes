@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+*.ttf binary
+*.png binary
+*.gz binary
+
+# anina's own recordings: regenerated, never edited by hand.
+docs/demos/*.svg -diff linguist-generated
+data/theme/fonts/** linguist-vendored

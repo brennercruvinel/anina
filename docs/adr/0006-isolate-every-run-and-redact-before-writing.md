@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [sandbox, privacy, home, path]
 supersedes: []
 superseded-by: null
-related: [src/sandbox, src/privacy.rs]
+related: [rust/sandbox, rust/privacy.rs]
 ---
 
 # ADR-0006: Isolate every run and redact before anything is written

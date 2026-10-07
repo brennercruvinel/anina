@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [tape, vhs, dsl]
 supersedes: []
 superseded-by: null
-related: [src/tape/mod.rs]
+related: [rust/tape/mod.rs]
 ---
 
 # ADR-0004: One tape language that also reads vhs tapes
@@ -25,7 +25,7 @@ charmbracelet/vhs made `.tape` files the common way to script terminal demos. tu
 
 ## Decision
 
-One parser reads both dialects (`src/tape/mod.rs`): `Type@50ms "…"`, `Enter 3`, `Ctrl+C`, `Sleep 500ms`, `Wait+Screen@10s /re/`, `Screenshot`, `Output`, `Require`, `Env`, `Source`, next to anina's own steps. Quoting is POSIX-like. vhs pixel and style settings (`FontSize`, `Width`, `Padding`…) become warnings: anina sizes by columns and rows and styles by themes. Without a `Spawn`, a tape types into a shell, as in vhs, after the prompt settles.
+One parser reads both dialects (`rust/tape/mod.rs`): `Type@50ms "…"`, `Enter 3`, `Ctrl+C`, `Sleep 500ms`, `Wait+Screen@10s /re/`, `Screenshot`, `Output`, `Require`, `Env`, `Source`, next to anina's own steps. Quoting is POSIX-like. vhs pixel and style settings (`FontSize`, `Width`, `Padding`…) become warnings: anina sizes by columns and rows and styles by themes. Without a `Spawn`, a tape types into a shell, as in vhs, after the prompt settles.
 
 ## Consequences
 

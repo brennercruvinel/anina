@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [wait, idle, flakiness]
 supersedes: []
 superseded-by: null
-related: [src/engine/mod.rs, src/record/mod.rs, src/teach.rs]
+related: [rust/engine/mod.rs, rust/record/mod.rs, rust/teach.rs]
 ---
 
 # ADR-0001: Wait for what the screen shows, not for the clock
@@ -31,7 +31,7 @@ Every step that depends on the program waits on the screen:
 - **One fixed text per state is enough** (`press enter to begin`, `steps ─`, `hits for`). Toasts hide what is under them: wait for them to go.
 - **Act on stable screens.** A reading is trusted only when two consecutive reads agree; the engine makes reads cheap enough for that (ADR-0002).
 - **Check machine-dependent state before acting** (`When "[ ] python env" Key Space`): a box may already be ticked.
-- **A timeout is a finding.** The error shows the screen it saw, suggests the closest text on it (`did you mean …?`) and saves the screen to disk (`src/teach.rs`). In tuicli one such timeout exposed a real bug in the program under test.
+- **A timeout is a finding.** The error shows the screen it saw, suggests the closest text on it (`did you mean …?`) and saves the screen to disk (`rust/teach.rs`). In tuicli one such timeout exposed a real bug in the program under test.
 
 `Sleep` remains only to let an animation finish before a screenshot, or to pace a demo.
 

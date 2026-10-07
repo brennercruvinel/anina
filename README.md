@@ -10,9 +10,9 @@ terminals.
 
 Think Playwright + Lighthouse + VHS, for terminal apps.
 
-<p align="center"><img src="docs/demos/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
+<p align="center"><img src="docs/demos/anina-tui.svg" alt="anina recording anina's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
 
-<sub>Recorded by `anina run urna`: a ratatui app with braille art, truecolor
+<sub>Recorded by `anina run anina`: a ratatui app with braille art, truecolor
 and live animation, in a 425 KB self-contained SVG (48 KB gzipped).</sub>
 
 ## What it does
@@ -22,16 +22,48 @@ and live animation, in a 425 KB self-contained SVG (48 KB gzipped).</sub>
 | `anina run PRESET` | A whole journey (install, first use, ...) or some parts of it: screenshots, an animated SVG per part, an HTML page, and a report of every file the program wrote |
 | `anina record TAPE` | Plays a script against a program; writes the recording and an animated SVG. Reads [vhs](https://github.com/charmbracelet/vhs) tapes too |
 | `anina init -- CMD` | You use the program; anina writes the tape, with waits on the text that appeared after each key |
-| `anina explore -- CMD` | Maps a TUI with no script: reads the key hints on screen, tries them, and builds a graph of every screen and key, with a Mermaid map and a tape to reach any screen |
+| `anina explore -- CMD` | *Experimental.* Maps a TUI with no script: reads the key hints on screen, tries them, and builds a graph of the screens and keys it found, with a Mermaid map and a tape to reach any screen |
 | `anina audit TAPE` | Runs the same journey in many terminals (sizes, 16/256/truecolor, `NO_COLOR`, `LC_ALL=C`) and scores stability, responsiveness, contrast (WCAG), compatibility and terminal hygiene |
 | `anina render CAST` | Re-renders a recording: theme, speed, light/dark chrome, poster PNG |
 | `anina brand CAST` | A theme taken from the app's own colors |
 | `anina export CAST` | asciicast v3, for the asciinema player, agg and asciinema.org |
+| `anina check [DIR]` | Looks through anina's output (casts inside their gzip too) for anything redaction should have hidden; fails if it finds some |
 | `anina doctor` | Checks that anina can drive a terminal here |
 
-Every run is isolated (a fresh HOME and environment, optionally an OS sandbox)
-and redacted before anything is written: your home path, user and host names,
-git identity and token-shaped secrets never reach a screenshot.
+## Privacy
+
+Every command redacts what it reads before anything is written: your home
+path, user and host names, git identity and token-shaped secrets become `~`,
+`user`, `host`, `you@example.com` and `••••` in screenshots, casts, SVGs,
+maps and reports. A replacement keeps the terminal grid, so the columns after
+it stay put. Each run ends with a line saying what was hidden:
+
+```text
+anina: redacted home path ×1, user name ×1, config rule ×3
+```
+
+What anina can't guess (the apps in a process list, a client's name) goes in
+`anina.toml` next to where you run it, or `~/.config/anina/config.toml`:
+
+```toml
+[redact]
+replace = { 'ChatGPT\.app' = "Notes.app" }   # regex = example text
+mask = ['/Applications/[^/ ]+\.app']          # regex, shown as •••, cell for cell
+```
+
+Before you publish anything, `anina check` looks for what should not be there:
+
+```text
+$ anina check anina-out
+anina-out/demo/demo.txt:3: home path: opened [/Users/me]/notes
+anina: 1 thing to hide in 1 file (27 files checked, 13 binary skipped)
+```
+
+`anina run` isolates every journey (a fresh HOME and environment); so does
+`anina explore --sandbox env`. With `--sandbox strict` the program can't write
+outside its sandbox, and on Linux it can't see the machine's other processes
+either. macOS has no way to hide them: there, a process list still shows the
+names, and `mask` rules are how you hide them.
 
 ## Install
 
@@ -47,7 +79,7 @@ macOS and Linux.
 ## Quick start
 
 ```sh
-anina presets                      # what ships: shell, astro, burn, urna
+anina presets                      # what ships: shell, astro, burn, anina
 anina run shell                    # the smallest journey, no network
 open anina-out/shell/index.html
 
@@ -56,6 +88,7 @@ anina record demo.tape             # -> anina-out/demo/demo.svg
 
 anina explore -- htop              # graph.json, map.md, screens/*.png
 anina audit demo.tape              # report.html with five scores
+anina check                        # nothing in anina-out you would not publish
 ```
 
 ## Gallery
@@ -65,7 +98,7 @@ All recorded by the presets in [`presets/`](presets), from an empty sandbox.
 | | |
 | --- | --- |
 | **create-astro**: inline prompts in Node, Houston included<br><img src="docs/demos/astro-create.svg" alt="create-astro, recorded by anina"> | **burn**: a training dashboard with braille plots and a quit popup<br><img src="docs/demos/burn-train.svg" alt="burn's training TUI, recorded by anina"> |
-| **urna setup**: an installer from an empty machine to its doctor checks<br><img src="docs/demos/urna-setup.svg" alt="urna setup, recorded by anina"> | **urna tui**: open, ask, read the cited answer<br><img src="docs/demos/urna-tui.svg" alt="urna tui, recorded by anina"> |
+| **anina setup**: an installer from an empty machine to its doctor checks<br><img src="docs/demos/anina-setup.svg" alt="anina setup, recorded by anina"> | **anina tui**: open, ask, read the cited answer<br><img src="docs/demos/anina-tui.svg" alt="anina tui, recorded by anina"> |
 
 ## Tapes
 
@@ -93,7 +126,10 @@ Wait+Screen@10s /hi/
 Screenshot shot.png
 ```
 
-The full reference is at the top of [`src/tape/mod.rs`](src/tape/mod.rs).
+The full reference is at the top of [`rust/tape/mod.rs`](rust/tape/mod.rs).
+A variable nobody set is an error that names it, never an empty string; in
+`Exec` the shell runs with `-u`, so its own variables (a loop's `$f`) work and
+a missing one fails there.
 A wait that fails says what was on screen and the closest text to what you
 asked for, and saves that screen.
 
@@ -105,7 +141,7 @@ tape per part of the journey.
 
 ```sh
 anina run burn                     # clone + build burn once (cached), then the training TUI
-anina run urna --part tui          # only the explorer part
+anina run anina --part tui          # only the explorer part
 anina run ./my-preset --sandbox strict
 ```
 
@@ -114,7 +150,7 @@ preset. See [`presets/`](presets) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What the audit found on its first runs
 
-- **urna**: writes truecolor even when the terminal does not announce it; its
+- **anina**: writes truecolor even when the terminal does not announce it; its
   dimmest palette steps fall below WCAG contrast (key-hint footer at 3.6:1);
   the home screen changes its wording at 80x24, which breaks tapes that wait
   on that text.
@@ -145,14 +181,15 @@ The reasons behind each choice are in [`docs/adr/`](docs/adr).
 - Mouse input is not scripted yet.
 - Glyphs outside JetBrains Mono (CJK, emoji, some arrows) use the viewer's
   fonts.
-- `explore` treats screens with the same key bar and most cells equal as one
-  state; very slow transitions may be credited to the wrong key.
+- `explore` is experimental. It treats screens with the same key bar and most
+  cells equal as one state, so a search box or a new sort order can show up as
+  a screen of its own; very slow transitions may be credited to the wrong key.
 - Windows is untested.
 
 ## License
 
 
-MIT, see [LICENSE](https://github.com/hoffresearch/urna/blob/main/LICENSE). [Hoff Research](https://hoffresearch.com)
+MIT, see [LICENSE](LICENSE). [Hoff Research](https://hoffresearch.com)
 JetBrains Mono is under the SIL Open Font License (`assets/fonts/OFL.txt`).
 ----
 Made it simple, but significant (∂μfμν = jν)

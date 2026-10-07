@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [outputs, runs]
 supersedes: []
 superseded-by: null
-related: [src/preset, src/record/mod.rs]
+related: [rust/preset, rust/record/mod.rs]
 ---
 
 # ADR-0009: One output folder per run, with stable screen names

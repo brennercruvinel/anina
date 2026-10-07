@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [engine, tui-test, tmux, pty]
 supersedes: []
 superseded-by: null
-related: [src/engine/mod.rs, src/engine/tuitest.rs, src/engine/tmux.rs]
+related: [rust/engine/mod.rs, rust/engine/tuitest.rs, rust/engine/tmux.rs]
 ---
 
 # ADR-0002: Run programs in an in-process terminal emulator (tui-test), with tmux as a fallback
@@ -43,7 +43,7 @@ Most control, most work; tui-test already did it and tests it against several em
 
 The `Engine` trait (`spawn`, `write`, `key`, `screen`, `modes`, `resize`, `exit_code`, `close`) is the only way the rest of anina touches a terminal. `tui-test` is the default; `tmux` stays as an alternative (a human can `tmux attach` to watch).
 
-A spike on three different programs before the decision: urna (ratatui, fullscreen, braille, truecolor), create-astro (inline prompts, Node) and burn's training dashboard (ratatui, braille plots, popups). All three drove and rendered identically to tmux; a full screen read took about 0.15 ms.
+A spike on three different programs before the decision: anina (ratatui, fullscreen, braille, truecolor), create-astro (inline prompts, Node) and burn's training dashboard (ratatui, braille plots, popups). All three drove and rendered identically to tmux; a full screen read took about 0.15 ms.
 
 ## Consequences
 
