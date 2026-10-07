@@ -10,9 +10,11 @@ cargo test --workspace
 cargo run --quiet -p anina -- doctor
 cargo deny check
 # the only warning expected here: the `leaks` test is not in the package.
-# a target dir of its own, emptied first: once packaged, the workspace's
-# crates are registry crates to cargo, and cargo never rebuilds or unpacks a
-# registry crate again at the same version, so a reused dir verifies against
-# what an earlier run packaged. it stays until the next run empties it.
+# a target dir under a new path on every run. once packaged, the workspace's
+# crates are registry crates to cargo: it unpacks each one into
+# ~/.cargo/registry/src/<hash of the registry's path>/ and never again at the
+# same version. under a path used before, emptying the dir is not enough: the
+# check builds against what the earlier run packaged.
+# the last run's dir goes first; this one stays until the next run.
 rm -rf target/fullcheck-package
-CARGO_TARGET_DIR=target/fullcheck-package cargo package --workspace --locked --allow-dirty
+CARGO_TARGET_DIR="target/fullcheck-package/$(date +%s)" cargo package --workspace --locked --allow-dirty
