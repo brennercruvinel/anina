@@ -96,7 +96,9 @@ fn esc(s: &str) -> String {
 
 /// `index.html` next to `run.json`: per part, the demo and the screenshots
 /// (PNG when rendered, the text otherwise).
-pub fn write_index(out: &Path, run: &Run) -> anyhow::Result<()> {
+/// Write `out/index.html`; with `embed`, the images go inside it.
+pub fn write_index(out: &Path, run: &Run, embed: bool) -> anyhow::Result<()> {
+    let src = |rel: &str| anina_render::index::img_src(out, rel, embed);
     let mut body = String::new();
     for p in &run.parts {
         body.push_str(&format!(
@@ -110,14 +112,14 @@ pub fn write_index(out: &Path, run: &Run) -> anyhow::Result<()> {
             body.push_str(&format!("<pre class=err>{}</pre>", esc(e)));
         }
         if let Some(svg) = &p.svg {
-            body.push_str(&format!("<p><img class=demo src=\"{}\" alt=\"{} demo\"></p>", esc(svg), esc(&p.title)));
+            body.push_str(&format!("<p><img class=demo src=\"{}\" alt=\"{} demo\"></p>", src(svg), esc(&p.title)));
         }
         if !p.shots.is_empty() {
             body.push_str("<div class=grid>");
             for s in &p.shots {
                 let name = s.rsplit('/').next().unwrap_or(s);
                 let fig = if out.join(format!("{s}.png")).is_file() {
-                    format!("<img src=\"{}.png\" alt=\"{}\">", esc(s), esc(name))
+                    format!("<img src=\"{}\" alt=\"{}\">", src(&format!("{s}.png")), esc(name))
                 } else {
                     let text = std::fs::read_to_string(out.join(format!("{s}.txt"))).unwrap_or_default();
                     format!("<pre>{}</pre>", esc(&text))

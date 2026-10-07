@@ -2,6 +2,11 @@
 //! -> a tape that replays it. Typing merges into `Type`, keys become `Key`,
 //! and after each step comes a `Wait` for text that newly appeared and stays
 //! put (volatile cells excluded), or a short `Sleep` when nothing did.
+//!
+//! The waits must hold in other terminal sizes too (`anina audit` replays the
+//! tape in several): after typing, the end of what was typed (it stays next
+//! to the cursor); after a scroll, `Idle` (what scrolls into view depends on
+//! the height); never a whole row whose columns are aligned by padding.
 
 use super::input::Ev;
 use anina_screen::{Mask, Screen};
@@ -105,12 +110,13 @@ fn group(s: &Session) -> Vec<(Out, f64, usize)> {
                             let continues = first
                                 && matches!(out.last(), Some((Out::Type(_), _, _)))
                                 && last_text_end.is_some_and(|(lt, li)| {
-                                    inp.t - lt < 1.5
-                                        && typing_only(
-                                            &s.inputs[li].before,
-                                            &inp.before,
-                                            &union(&s.volatile, &inp.quiet),
-                                        )
+                                    inp.t - lt < TYPING_GAP
+                                        || inp.t - lt < 1.5
+                                            && typing_only(
+                                                &s.inputs[li].before,
+                                                &inp.before,
+                                                &union(&s.volatile, &inp.quiet),
+                                            )
                                 });
                             if continues {
                                 if let Some((Out::Type(prev), _, _)) = out.last_mut() {
@@ -266,18 +272,35 @@ fn count(hay: &str, needle: &str) -> usize {
     hay.match_indices(needle).count()
 }
 
-const MAX_WAIT: usize = 48;
+/// The longest text a wait may hold. `anina audit` replays the tape down to
+/// 60x20, where a panel keeps some 30 columns: a longer wait would not fit.
+const MAX_WAIT: usize = 24;
+
+/// Text that ends past this column at the recording size is cut off in the
+/// narrowest terminal `anina audit` tries (60 columns, less a border).
+const NARROW_COLS: u16 = 56;
+
+/// Text keys closer than this are typing, whatever a completion popup does
+/// to the screen in between.
+const TYPING_GAP: f64 = 0.25;
+
+/// Text never seen earlier in the session ranks above any text that was:
+/// what a step brings up beats what a closing popup uncovers.
+const NEW_TO_SESSION: i64 = 100;
 
 /// The best text to wait for after a step: new since `before`, unique on
 /// `after`, made of cells that do not change by themselves, preferably free
-/// of digits (timings and counters change from run to run). Returns the
-/// tape argument (a literal, or a `/^row$/` regex for a whole new row).
-pub fn distinctive(before: &Screen, after: &Screen, volatile: &Mask) -> Option<String> {
-    candidates(before, after, volatile).into_iter().next().filter(|c| c.0 > 0).map(|c| c.1)
+/// of digits (timings and counters change from run to run), and new to the
+/// whole session: text that was already on an earlier screen (`seen`) and
+/// only came back from under a popup says little about what this step did.
+/// Returns the tape argument (a literal, or a `/^row$/` regex for a whole new
+/// row).
+pub fn distinctive(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) -> Option<String> {
+    candidates(before, after, volatile, seen).into_iter().next().filter(|c| c.0 > 0).map(|c| c.1)
 }
 
 /// Every text `distinctive` could pick, best first, with its score.
-pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask) -> Vec<(i64, String)> {
+pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) -> Vec<(i64, String)> {
     let before_text = format!("{}\n{}", before.text(), before.text_flat());
     let after_text = after.text();
     let mut found: Vec<(i64, String)> = Vec::new();
@@ -343,6 +366,13 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask) -> Vec<(i64,
                 if row_new {
                     score += 4;
                 }
+                // digits are counters and clocks ("32 minutes ago"): new, but not news
+                if !digits && !seen.contains(&text) {
+                    score += NEW_TO_SESSION;
+                }
+                if seg.cols[b - 1] >= NARROW_COLS {
+                    score -= NEW_TO_SESSION / 2;
+                }
                 consider(score, quote(&text));
             }
         }
@@ -350,9 +380,13 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask) -> Vec<(i64,
         let alnum = row.chars().filter(|c| c.is_alphanumeric()).count();
         let unique_line = after_text.lines().filter(|l| *l == row).count() == 1;
         let stable = (0..after.cols).all(|x| !volatile.get(x, y) || after.cell(x, y).is_blank());
-        if row_new && alnum >= 2 && unique_line && stable && row.chars().count() <= 80 {
+        let padded = row.trim().contains("  ") || row.trim().chars().count() > MAX_WAIT;
+        if row_new && alnum >= 2 && unique_line && stable && !padded && row.chars().count() <= 80 {
             let digits = row.chars().any(|c| c.is_ascii_digit());
-            let score = alnum.min(40) as i64 - 2 + if digits { -20 } else { 8 };
+            let mut score = alnum.min(40) as i64 - 2 + if digits { -20 } else { 8 };
+            if !digits && !seen.lines().any(|l| l == row) {
+                score += NEW_TO_SESSION;
+            }
             consider(score, quote(&format!("/^{}$/", regex::escape(&row))));
         }
     }
@@ -387,7 +421,9 @@ pub fn write(s: &Session) -> String {
     let first_t = steps.first().map_or(s.end, |st| st.1);
     let first_screen = steps.first().map_or(&s.last, |st| before_of(st.2));
     let first_quiet = steps.first().map_or(&s.last_quiet, |st| &s.inputs[st.2].quiet);
-    push_sync(&mut lines, &blank, first_screen, &union(&s.volatile, first_quiet), first_t);
+    push_sync(&mut lines, &blank, first_screen, &union(&s.volatile, first_quiet), first_t, "", None);
+    // every screen so far, to tell new text from text that came back
+    let mut seen = first_screen.text();
 
     let mut resizes = s.resizes.iter().peekable();
     let mut out: Vec<String> = Vec::new();
@@ -409,7 +445,9 @@ pub fn write(s: &Session) -> String {
         if k + 1 == steps.len() && s.last.text().trim().is_empty() {
             break; // the program closed its screen: nothing to wait for
         }
-        push_sync(&mut out, before_of(*idx), after, &union(&s.volatile, quiet), gap);
+        push_sync(&mut out, before_of(*idx), after, &union(&s.volatile, quiet), gap, &seen, Some(step));
+        seen.push('\n');
+        seen.push_str(&after.text());
     }
     lines.extend(merge_keys(out));
     let mut text = lines.join("\n");
@@ -426,9 +464,30 @@ fn union(a: &Mask, b: &Mask) -> Mask {
     m
 }
 
-fn push_sync(out: &mut Vec<String>, before: &Screen, after: &Screen, volatile: &Mask, gap: f64) {
+fn push_sync(
+    out: &mut Vec<String>,
+    before: &Screen,
+    after: &Screen,
+    volatile: &Mask,
+    gap: f64,
+    seen: &str,
+    step: Option<&Out>,
+) {
+    if before.cells != after.cells {
+        if let Some(Out::Type(typed)) = step
+            && let Some(tail) = typed_tail(typed, before, after)
+        {
+            out.push(format!("Wait {}", quote(&tail)));
+            return;
+        }
+        if scrolled(before, after) {
+            // bounded: a blinking cursor keeps a screen from ever going idle
+            out.push("Idle 3".into());
+            return;
+        }
+    }
     if before.cells != after.cells
-        && let Some(w) = distinctive(before, after, volatile)
+        && let Some(w) = distinctive(before, after, volatile, seen)
     {
         out.push(format!("Wait {w}"));
         return;
@@ -436,6 +495,41 @@ fn push_sync(out: &mut Vec<String>, before: &Screen, after: &Screen, volatile: &
     if gap >= 0.25 {
         out.push(format!("Sleep {:.2}", gap.min(3.0)));
     }
+}
+
+/// The shortest end of `typed`, cut at a word, that shows once on `after`
+/// and not on `before`: the text next to the cursor, on screen at any width.
+fn typed_tail(typed: &str, before: &Screen, after: &Screen) -> Option<String> {
+    let (b, a) = (before.text(), after.text());
+    let starts = std::iter::once(0).chain(typed.match_indices(' ').map(|(i, _)| i + 1));
+    let mut tails: Vec<&str> = starts.map(|i| &typed[i..]).collect();
+    tails.reverse(); // shortest first
+    tails
+        .into_iter()
+        .map(str::trim)
+        .find(|t| {
+            t.chars().filter(|c| c.is_alphanumeric()).count() >= 6
+                && t.chars().count() <= MAX_WAIT
+                && count(&a, t) == 1
+                && !b.contains(t)
+        })
+        .map(String::from)
+}
+
+/// Did the screen move up or down, most of its rows the same, shifted?
+fn scrolled(before: &Screen, after: &Screen) -> bool {
+    if before.rows != after.rows || before.cols != after.cols {
+        return false;
+    }
+    let rows = after.rows as i32;
+    let row = |s: &Screen, y: i32| s.row_text(y as u16);
+    let filled: Vec<i32> = (0..rows).filter(|y| !row(after, *y).trim().is_empty()).collect();
+    let same = |d: i32| {
+        filled.iter().filter(|&&y| (0..rows).contains(&(y + d)) && row(after, y) == row(before, y + d)).count()
+    };
+    let still = same(0);
+    let best = (1..rows / 2).flat_map(|d| [d, -d]).map(same).max().unwrap_or(0);
+    best >= 3 && best * 2 >= filled.len() && best > still
 }
 
 fn fmt(o: &Out) -> String {
@@ -469,4 +563,38 @@ fn merge_keys(lines: Vec<String>) -> Vec<String> {
         out.push(l);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen(lines: &[&str]) -> Screen {
+        anina_screen::escape::parse(&lines.join("\r\n"), 60, lines.len() as u16)
+    }
+
+    #[test]
+    fn a_scroll_is_seen_as_one() {
+        let a = screen(&["title", "line 1", "line 2", "line 3", "line 4", "line 5", "status"]);
+        let b = screen(&["title", "line 2", "line 3", "line 4", "line 5", "line 6", "status"]);
+        assert!(scrolled(&a, &b));
+        let c = screen(&["title", "other", "things", "on", "a", "new screen", "status"]);
+        assert!(!scrolled(&a, &c));
+    }
+
+    #[test]
+    fn after_typing_the_wait_is_the_end_of_the_text() {
+        let a = screen(&["> select x", "", ""]);
+        let b = screen(&["> ct x from sales order by downloads desc", "", ""]);
+        let tail = typed_tail("select x from sales order by downloads desc", &a, &b);
+        assert_eq!(tail.as_deref(), Some("downloads desc"));
+    }
+
+    #[test]
+    fn a_padded_row_is_not_a_whole_row_wait() {
+        let a = screen(&["", "", ""]);
+        let b = screen(&["close      write      quit", "", ""]);
+        let c = candidates(&a, &b, &Mask::new(60, 3), "");
+        assert!(c.iter().all(|(_, w)| !w.starts_with("'/^")), "{c:?}");
+    }
 }

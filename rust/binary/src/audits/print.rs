@@ -89,7 +89,9 @@ pub fn screen_html(s: &Screen) -> String {
     out
 }
 
-pub fn write_html(r: &Report, path: &Path) -> Result<()> {
+/// Write the HTML report at `path`; with `embed`, the screenshots go inside it.
+pub fn write_html(r: &Report, path: &Path, embed: bool) -> Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
     let mut h = String::new();
     let _ = write!(
         h,
@@ -187,7 +189,11 @@ th{{color:var(--dim);font-weight:600}}.chip{{display:inline-block;padding:1px 8p
     h.push_str("</table><h2>Contact sheet</h2><div class=\"sheet\">");
     for o in r.variants {
         let body = match (&o.shot_png, &o.shot) {
-            (Some(p), _) => format!("<img src=\"{}\" alt=\"{}\">", esc(p), esc(&o.variant.name)),
+            (Some(p), _) => format!(
+                "<img src=\"{}\" alt=\"{}\">",
+                anina_render::index::img_src(dir, p, embed),
+                esc(&o.variant.name)
+            ),
             (None, Some(s)) => format!("<pre class=\"term\">{}</pre>", screen_html(s)),
             (None, None) => "<pre class=\"term\">(no screen)</pre>".into(),
         };

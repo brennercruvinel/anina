@@ -39,3 +39,8 @@ cli = "tui-test"
 path = "rust/runner/src/engine/outer.rs"
 about = "the tmux engine, the fallback"
 cli = "tmux"
+
+[terms.versus]
+path = "rust/binary/src/versus.rs"
+about = "compares two runs, timing aside: files, screens as text, pixels, reports"
+cli = "compare"

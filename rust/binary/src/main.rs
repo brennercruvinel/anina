@@ -2,6 +2,7 @@ mod audits;
 mod checks;
 mod mapper;
 mod taping;
+mod versus;
 
 use anina_record::{self as record, preset};
 use anina_render::{self as render, brand};
@@ -46,6 +47,8 @@ enum Cmd {
     },
     /// Look through anina's output for anything redaction should have hidden
     Check(checks::Args),
+    /// Compare two runs, timing aside: files, screens as text, pixels, reports
+    Compare(versus::Args),
     /// Check that anina can run here
     Doctor,
 }
@@ -53,7 +56,7 @@ enum Cmd {
 fn main() {
     let cli = Cli::parse();
     if let Err(e) = dispatch(cli.cmd) {
-        eprintln!("anina: {e:#}");
+        eprintln!("anina: {}", redact::Redactor::shared().quiet(&format!("{e:#}")));
         std::process::exit(1);
     }
 }
@@ -61,9 +64,9 @@ fn main() {
 fn dispatch(cmd: Cmd) -> Result<()> {
     redact::init()?;
     match cmd {
-        Cmd::Run(a) => preset::run(a),
+        Cmd::Run(a) => preset::run(a).and_then(|out| checks::verify(&out)),
         Cmd::Presets => preset::list(),
-        Cmd::Record(a) => record::run(a),
+        Cmd::Record(a) => record::run(a).and_then(|out| checks::verify(&out)),
         Cmd::Render(a) => render::run(a),
         Cmd::Explore(a) => mapper::run(a),
         Cmd::Init(a) => taping::run(a),
@@ -79,10 +82,11 @@ fn dispatch(cmd: Cmd) -> Result<()> {
                 ))
             });
             std::fs::write(&out, c.to_asciicast())?;
-            eprintln!("anina: asciicast v3 -> {}", out.display());
+            eprintln!("anina: asciicast v3 -> {}", screen::lesson::shown(&out));
             Ok(())
         }
         Cmd::Check(a) => checks::run(a),
+        Cmd::Compare(a) => versus::run(a),
         Cmd::Doctor => doctor(),
     }
 }

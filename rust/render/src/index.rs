@@ -11,6 +11,22 @@ pub struct Item {
     pub caption: String,
 }
 
+/// `rel`, a file under `dir`, as an `<img src>` value, escaped: the path
+/// itself, or with `embed` the file inlined as a data URI, so the page is one
+/// file to share. A file that can't be read stays a path.
+pub fn img_src(dir: &Path, rel: &str, embed: bool) -> String {
+    use base64::Engine as _;
+    if embed && let Ok(bytes) = std::fs::read(dir.join(rel)) {
+        let mime = match rel.rsplit('.').next() {
+            Some("svg") => "image/svg+xml",
+            Some("png") => "image/png",
+            _ => "application/octet-stream",
+        };
+        return format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+    }
+    esc(rel)
+}
+
 fn href(dir: &Path, p: &Path) -> String {
     match p.strip_prefix(dir) {
         Ok(rel) => rel.display().to_string(),

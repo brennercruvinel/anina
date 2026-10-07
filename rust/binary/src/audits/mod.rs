@@ -3,6 +3,9 @@
 //! terminals: sizes, color capabilities, locales. Each run is measured
 //! (crashes, time to first screen, key latency, WCAG contrast, honoring
 //! NO_COLOR and TERM, the terminal state left at exit) and scored.
+//!
+//! With `--preset`, the journey is a preset's part, played in the preset's
+//! sandbox; every terminal starts from the sandbox as prepare left it.
 
 pub mod cases;
 pub mod meter;
@@ -10,6 +13,7 @@ pub mod print;
 pub mod ratio;
 pub mod score;
 
+use anina_record::preset::{Stage, StageArgs};
 use anina_record::{self as record, Config, Options};
 use anina_runner::engine::{self, Spec};
 use anina_runner::redact::Redactor;
@@ -21,13 +25,25 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 #[derive(clap::Args, Debug)]
-#[command(group(clap::ArgGroup::new("target").required(true).args(["tape", "command"])))]
+#[command(group(clap::ArgGroup::new("target").required(true).args(["tape", "command", "preset"])))]
 pub struct Args {
     /// The journey: a tape (anina or vhs dialect)
     pub tape: Option<PathBuf>,
     /// Or a program to open and quit by itself, after --
     #[arg(last = true)]
     pub command: Vec<String>,
+    /// Or a preset: each part played in every terminal, in the preset's sandbox
+    #[arg(long)]
+    pub preset: Option<String>,
+    /// With --preset: only these parts (repeatable)
+    #[arg(long, requires = "preset")]
+    pub part: Vec<String>,
+    /// With --preset: sandbox mode over the preset's: off, env, strict
+    #[arg(long, requires = "preset")]
+    pub sandbox: Option<String>,
+    /// Put the screenshots inside report.html: one file to share
+    #[arg(long)]
+    pub embed: bool,
     /// Output directory (default: anina-out/audit-<name>)
     #[arg(short, long)]
     pub out: Option<PathBuf>,
@@ -55,6 +71,9 @@ pub struct Args {
 }
 
 pub fn run(a: Args) -> Result<()> {
+    if let Some(p) = &a.preset {
+        return run_preset(&a, p);
+    }
     let (name, target) = match (&a.tape, a.command.first()) {
         (Some(t), _) => {
             (t.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned()), t.display().to_string())
@@ -85,7 +104,46 @@ pub fn run(a: Args) -> Result<()> {
             tape
         }
     };
+    audit(&a, &tape, &target, &out, None)?;
+    crate::checks::verify(&out)
+}
 
+/// Audit every part of a preset (or `--part`), one report per part.
+fn run_preset(a: &Args, preset: &str) -> Result<()> {
+    let name = anina_record::preset::specs::Manifest::load(&anina_record::preset::resolve(preset)?)?.name;
+    let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("audit-{name}")));
+    std::fs::create_dir_all(&out)?;
+    let out = std::fs::canonicalize(&out)?;
+    let slot = format!("audit-{name}");
+    let stage = Stage::new(&StageArgs {
+        preset,
+        out: &out,
+        sandbox: a.sandbox.as_deref(),
+        vars: &a.vars,
+        redact: &[],
+        keep: false,
+        slot: Some(&slot),
+    })?;
+    stage.freeze()?;
+    let parts = stage.parts(&a.part)?;
+    for part in &parts {
+        let gaps = stage.gaps(part);
+        if !gaps.is_empty() {
+            eprintln!("anina [{name}] part {} skipped: set {}", part.name, gaps.join(", "));
+            continue;
+        }
+        let pout = if parts.len() == 1 { out.clone() } else { out.join(&part.name) };
+        std::fs::create_dir_all(&pout)?;
+        let tape = stage.tape(part, &pout)?;
+        eprintln!("anina [{name}] auditing part {} · {}", part.name, Stage::title(part));
+        audit(a, &tape, &format!("{name} · {}", part.name), &pout, Some(&stage))?;
+    }
+    crate::checks::verify(&out)
+}
+
+/// Play `tape` in every terminal of the matrix, score it, write the report.
+/// With a stage, each terminal runs in the preset's sandbox, restored first.
+fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>) -> Result<()> {
     let sizes = cases::parse_sizes(&a.sizes)?;
     let variants = cases::variants(&sizes, a.quick, a.full);
     let mut outcomes = Vec::new();
@@ -97,17 +155,24 @@ pub fn run(a: Args) -> Result<()> {
             engine: a.engine.clone(),
             out_dir: dir.clone(),
             force: v.force(a.fps),
-            redactor: Some(Redactor::defaults()),
+            redactor: Some(stage.map_or_else(Redactor::defaults, |st| st.red.clone())),
             png: false,
             quiet: true,
         };
         let started = Instant::now();
-        let rec = record::record(&tape, Config::default(), opts);
+        let cfg = match stage {
+            Some(st) => {
+                st.restore()?;
+                st.config(&v.name)
+            }
+            None => Config::default(),
+        };
+        let rec = record::record(tape, cfg, opts);
         let mut o = meter::outcome(v, rec, &dir);
         if let Some(s) = &o.shot {
             let png = dir.join("screen.png");
             if anina_render::pixel::screen_png(s, &v.name, "", &png).is_ok() {
-                o.shot_png = png.strip_prefix(&out).ok().map(|p| p.display().to_string());
+                o.shot_png = png.strip_prefix(out).ok().map(|p| p.display().to_string());
             }
         }
         eprintln!(
@@ -131,18 +196,18 @@ pub fn run(a: Args) -> Result<()> {
         tool: "anina audit",
         version: env!("CARGO_PKG_VERSION"),
         generated: anina_screen::frames::now_iso(),
-        target,
+        target: target.to_string(),
         engine: a.engine.clone(),
         scores: &scores,
         variants: &outcomes,
     };
     print::write_json(&rep, &out.join("report.json"))?;
-    print::write_html(&rep, &out.join("report.html"))?;
-    print!("{}", print::summary(&rep));
+    print::write_html(&rep, &out.join("report.html"), a.embed)?;
+    print!("{}", Redactor::shared().quiet(&print::summary(&rep)));
     if let Some(r) = anina_runner::redact::summary() {
         eprintln!("\nanina: redacted {r}");
     }
-    eprintln!("\nanina: report -> {}", out.join("report.html").display());
+    eprintln!("\nanina: report -> {}", anina_screen::lesson::shown(&out.join("report.html")));
     Ok(())
 }
 
