@@ -2,6 +2,7 @@ mod audits;
 mod checks;
 mod mapper;
 mod taping;
+mod versus;
 
 use anina_record::{self as record, preset};
 use anina_render::{self as render, brand};
@@ -46,6 +47,8 @@ enum Cmd {
     },
     /// Look through anina's output for anything redaction should have hidden
     Check(checks::Args),
+    /// Compare two runs, timing aside: files, screens as text, pixels, reports
+    Compare(versus::Args),
     /// Check that anina can run here
     Doctor,
 }
@@ -83,6 +86,7 @@ fn dispatch(cmd: Cmd) -> Result<()> {
             Ok(())
         }
         Cmd::Check(a) => checks::run(a),
+        Cmd::Compare(a) => versus::run(a),
         Cmd::Doctor => doctor(),
     }
 }
