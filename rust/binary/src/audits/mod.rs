@@ -111,7 +111,8 @@ pub fn run(a: Args) -> Result<()> {
 /// Audit every part of a preset (or `--part`), one report per part.
 fn run_preset(a: &Args, preset: &str) -> Result<()> {
     let (dir, m) = anina_record::preset::load(preset)?;
-    m.pick(&a.part)?;
+    // picked before any work: a wrong --part fails here
+    let parts: Vec<anina_record::preset::specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
     let name = m.name.clone();
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("audit-{name}")));
     std::fs::create_dir_all(&out)?;
@@ -130,7 +131,6 @@ fn run_preset(a: &Args, preset: &str) -> Result<()> {
         },
     )?;
     stage.freeze()?;
-    let parts = stage.manifest.pick(&a.part)?;
     for part in &parts {
         let gaps = stage.gaps(part);
         if !gaps.is_empty() {
