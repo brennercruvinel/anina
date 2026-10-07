@@ -28,7 +28,7 @@ pub fn run(a: Args) -> Result<()> {
             std::fs::write(&p, json + "\n").with_context(|| format!("writing {}", p.display()))?;
             eprintln!(
                 "anina: theme -> {} (bg {}, fg {}, accent {})",
-                p.display(),
+                anina_screen::lesson::shown(&p),
                 th.terminal.bg,
                 th.terminal.fg,
                 th.caption.accent

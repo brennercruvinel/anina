@@ -210,13 +210,23 @@ impl Redactor {
 
     /// Redact plain text: a message, a path, a field of a report.
     pub fn text(&self, s: &str) -> String {
+        self.redact_text(s, true)
+    }
+
+    /// Redact for the terminal (an error, a status line) without counting:
+    /// the summary keeps telling what the written files had.
+    pub fn quiet(&self, s: &str) -> String {
+        self.redact_text(s, false)
+    }
+
+    fn redact_text(&self, s: &str, count: bool) -> String {
         let mut out = s.to_string();
         for rule in &self.rules {
             out = rule
                 .re
                 .replace_all(&out, |caps: &Captures| {
                     let with = rule.replacement(caps);
-                    if with != caps[0] {
+                    if count && with != caps[0] {
                         note(rule.label, &caps[0]);
                     }
                     with

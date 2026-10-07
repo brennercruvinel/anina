@@ -944,7 +944,7 @@ pub fn run(a: Args) -> Result<()> {
     if let Some(r) = anina_runner::redact::summary() {
         eprintln!("anina explore: redacted {r}");
     }
-    eprintln!("anina explore: map -> {}", out.join("map.md").display());
+    eprintln!("anina explore: map -> {}", anina_screen::lesson::shown(&out.join("map.md")));
     if pngs == 0 {
         eprintln!("anina explore: no PNG renderer here; screens saved as .txt and .ansi");
     }
@@ -955,7 +955,7 @@ pub fn run(a: Args) -> Result<()> {
             .ok_or_else(|| anyhow!("s{target} shows {want:?} but no recorded way leads there"))?;
         let p = out.join("path.tape");
         std::fs::write(&p, tape)?;
-        eprintln!("anina explore: s{target} shows {want:?}; the way there -> {}", p.display());
+        eprintln!("anina explore: s{target} shows {want:?}; the way there -> {}", anina_screen::lesson::shown(&p));
     }
     Ok(())
 }

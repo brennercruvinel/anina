@@ -53,7 +53,7 @@ enum Cmd {
 fn main() {
     let cli = Cli::parse();
     if let Err(e) = dispatch(cli.cmd) {
-        eprintln!("anina: {e:#}");
+        eprintln!("anina: {}", redact::Redactor::shared().quiet(&format!("{e:#}")));
         std::process::exit(1);
     }
 }
@@ -79,7 +79,7 @@ fn dispatch(cmd: Cmd) -> Result<()> {
                 ))
             });
             std::fs::write(&out, c.to_asciicast())?;
-            eprintln!("anina: asciicast v3 -> {}", out.display());
+            eprintln!("anina: asciicast v3 -> {}", screen::lesson::shown(&out));
             Ok(())
         }
         Cmd::Check(a) => checks::run(a),

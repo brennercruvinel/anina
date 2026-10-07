@@ -78,7 +78,7 @@ pub fn run(a: Args) -> Result<()> {
             r.poster,
             r.svg.len() / 1024,
             gz / 1024,
-            path.display()
+            anina_screen::lesson::shown(path)
         );
     }
     shape::write(&out.with_extension("txt"), &shape::transcript(&cast))?;
@@ -92,7 +92,7 @@ pub fn run(a: Args) -> Result<()> {
         );
         let p = out.with_extension("picture.html");
         std::fs::write(&p, &snippet)?;
-        eprintln!("anina: README snippet -> {}\n{snippet}", p.display());
+        eprintln!("anina: README snippet -> {}\n{snippet}", anina_screen::lesson::shown(&p));
     }
     if a.poster && !cast.frames.is_empty() {
         let f = &cast.frames[cast.poster.min(cast.frames.len() - 1)];
@@ -101,7 +101,7 @@ pub fn run(a: Args) -> Result<()> {
             out.file_stem().map_or("out".into(), |s| s.to_string_lossy().into_owned())
         ));
         pixel::screen_png_with(&cast.screen(f.s), &cast.title, &th, &p)?;
-        eprintln!("anina: poster -> {}", p.display());
+        eprintln!("anina: poster -> {}", anina_screen::lesson::shown(&p));
     }
     Ok(())
 }

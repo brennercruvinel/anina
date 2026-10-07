@@ -72,7 +72,29 @@ pub fn wait_failed(screen: &Screen, pat: &Pattern, gone: bool, secs: f64, dump: 
         && std::fs::write(dir.join("failed.txt"), &text).is_ok()
         && std::fs::write(dir.join("failed.ansi"), screen.to_ansi()).is_ok()
     {
-        msg.push_str(&format!("\n  saved: {}", dir.join("failed.txt").display()));
+        msg.push_str(&format!("\n  saved: {}", self::shown(&dir.join("failed.txt"))));
     }
     anyhow::anyhow!(msg)
+}
+
+/// A path the way a status line shows it: relative to the working directory
+/// when it is under it, `~/...` under HOME, as is otherwise. Output pasted into
+/// a README or an issue then names no machine.
+pub fn shown(p: &std::path::Path) -> String {
+    if !p.is_absolute() {
+        return p.display().to_string();
+    }
+    let rel = |base: &std::path::Path| p.strip_prefix(base).ok().map(|r| r.display().to_string());
+    if let Ok(cwd) = std::env::current_dir() {
+        let real = std::fs::canonicalize(&cwd).unwrap_or_else(|_| cwd.clone());
+        if let Some(r) = rel(&cwd).or_else(|| rel(&real)) {
+            return if r.is_empty() { ".".into() } else { r };
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from)
+        && let Some(r) = rel(&home)
+    {
+        return if r.is_empty() { "~".into() } else { format!("~/{r}") };
+    }
+    p.display().to_string()
 }

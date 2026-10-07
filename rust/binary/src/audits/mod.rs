@@ -138,11 +138,11 @@ pub fn run(a: Args) -> Result<()> {
     };
     print::write_json(&rep, &out.join("report.json"))?;
     print::write_html(&rep, &out.join("report.html"))?;
-    print!("{}", print::summary(&rep));
+    print!("{}", Redactor::shared().quiet(&print::summary(&rep)));
     if let Some(r) = anina_runner::redact::summary() {
         eprintln!("\nanina: redacted {r}");
     }
-    eprintln!("\nanina: report -> {}", out.join("report.html").display());
+    eprintln!("\nanina: report -> {}", anina_screen::lesson::shown(&out.join("report.html")));
     Ok(())
 }
 
