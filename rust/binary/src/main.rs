@@ -62,6 +62,7 @@ fn main() {
 }
 
 fn dispatch(cmd: Cmd) -> Result<()> {
+    checks::mark_start();
     redact::init()?;
     match cmd {
         Cmd::Run(a) => preset::run(a).and_then(|out| checks::verify(&out)),
