@@ -24,9 +24,11 @@ related: [rust/binary/src/taping/print.rs, rust/screen/src/lib.rs, ADR-0001, ADR
 
 ## Decision
 
-- **After a scroll:** wait for new text within six rows of the cursor. Rows next to the cursor (a shell's last output, an editor's new line) show in every height. When the cursor is hidden or nothing new sits near it, `Idle 3` is still the step.
-- **After typing:** first the echo, then the program's answer, found away from the echo's rows (the cursor's rows when it shows, and any row holding the typed text): a `Wait` for text it brought up and a `Gone` for text it took away. A filter's bar shows with its first key, but its rows go only once it ran, so both are written when both exist. `Idle 3` comes only when neither exists. The echo may drop leading signs (`/install` echoes as `install`).
+- **After a scroll:** wait for new text near the cursor, up to ten rows above it and ten below, counted as the rows wrap at 60 columns (a 190-column row counts as four). Rows next to the cursor (a shell's last output, an editor's new line) show in every height. When the cursor is hidden or nothing new sits near it, `Idle 3` is still the step.
+- **After typing:** first the echo, then the program's answer, found away from the echo's rows: a `Wait` for text it brought up and a `Gone` for text it took away. A filter's bar shows with its first key, but its rows go only once it ran, so both are written when both exist. `Idle 3` comes only when neither exists. The echo may drop leading signs (`/install` echoes as `install`). The echo's rows are the cursor's, from where typing started to where it ended, counting the rows it wrapped over. With the cursor hidden they are the rows that end with the typed text, the way an input field shows it. A row that merely holds the text doesn't count, since typing `e` would hide every row with an e.
+- **No `Gone` after a scroll:** rows that leave at the top leave with the scroll (a long line wrapped on the last row). In a taller terminal they stay, so after a scroll only new text counts.
 - **Wrapped text:** a literal `Wait` also matches rows joined where a row is filled to its last column, the way the terminal wrapped it.
+- **One reading of the screen:** `Screen::shows` and `Screen::count_shown` are what the replay's literal `Wait` and `Gone` match with. The recorder picks with the same two: a wait never shows before the step and shows once after it, and a `Gone` never shows after it. Text that touches an edge the terminal wrapped at (`comp` ending a full row, `lete` starting the next) is never picked, because another width cuts it elsewhere.
 
 ## Consequences
 
@@ -47,5 +49,6 @@ related: [rust/binary/src/taping/print.rs, rust/screen/src/lib.rs, ADR-0001, ADR
 ## References
 
 - `rust/binary/src/taping/print.rs` (`push_sync`, `appeared`, `reaction`, `vanished`)
-- `rust/screen/src/lib.rs` (`Screen::text_unwrapped`)
+- `rust/screen/src/lib.rs` (`Screen::text_unwrapped`, `Screen::shows`, `Screen::count_shown`)
+- Review of #58: #59 and its sub-issues #60 to #68
 - ADR-0001, ADR-0008

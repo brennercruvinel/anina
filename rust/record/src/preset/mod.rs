@@ -11,7 +11,8 @@
 pub mod print;
 pub mod specs;
 
-use crate::cordon::{Mode, Sandbox, diffs::Snapshot};
+use crate::cordon::diffs::{Differ, Snapshot};
+use crate::cordon::{Mode, Sandbox};
 use crate::{Config, Options};
 use anina_runner::redact::Redactor;
 use anina_runner::script::{Tape, expand};
@@ -373,40 +374,70 @@ impl Stage {
     }
 
     /// Put the sandbox back as `freeze` left it. Nothing to do before the
-    /// first play; after one, only the paths it changed are put back (an
-    /// install of hundreds of MB stays where it is), and the whole tree is
-    /// copied again only when that fails.
+    /// first play; after one, only what it changed is put back (an install of
+    /// hundreds of MB stays where it is) and read again, and the whole tree
+    /// is copied again only when that fails.
     pub fn restore(&self) -> Result<()> {
         if self.fresh.replace(false) {
             return Ok(());
         }
         let root = &self.sandbox.root;
-        let now = Snapshot::take(root);
+        let mut now = Snapshot::take(root);
         let changed = self.base.borrow().differs(&now);
-        if let Err(e) = self.put_back(&changed) {
-            eprintln!("anina: restoring {} path(s) failed ({e}); copying the whole sandbox", changed.len());
-            remove_tree(root).with_context(|| format!("emptying {}", root.display()))?;
-            copy_tree(&self.pristine(), root).with_context(|| format!("restoring {}", root.display()))?;
-        }
-        self.base.replace(Snapshot::take(root));
-        Ok(())
-    }
-
-    /// Each path as `freeze` saved it: gone when it did not exist then.
-    fn put_back(&self, paths: &[String]) -> std::io::Result<()> {
-        let (root, saved) = (&self.sandbox.root, self.pristine());
-        for p in paths {
-            let (now, then) = (root.join(p), saved.join(p));
-            match std::fs::symlink_metadata(&now) {
-                Ok(md) if md.is_dir() => remove_tree(&now)?,
-                Ok(_) => std::fs::remove_file(&now)?,
-                Err(_) => {}
+        match put_back(root, &self.pristine(), &changed) {
+            Ok(()) => now.refresh(root, &changed),
+            Err(e) => {
+                eprintln!("anina: putting back {} path(s) failed ({e}); copying the whole sandbox", changed.len());
+                remove_tree(root).with_context(|| format!("emptying {}", root.display()))?;
+                copy_tree(&self.pristine(), root).with_context(|| format!("restoring {}", root.display()))?;
+                now = Snapshot::take(root);
             }
-            let Ok(md) = std::fs::symlink_metadata(&then) else { continue };
-            copy_entry(&then, &now, md.file_type())?;
         }
+        self.base.replace(now);
         Ok(())
     }
+}
+
+/// Each path that differs, as `saved` holds it: gone when it isn't there,
+/// folders with their permissions. Fails on anything but a missing path, so
+/// the caller can fall back to a whole copy.
+fn put_back(root: &Path, saved: &Path, changed: &[Differ]) -> std::io::Result<()> {
+    use std::io::ErrorKind::NotFound;
+    use std::os::unix::fs::PermissionsExt;
+    // folders that end with saved's permissions: those that changed, and the
+    // parents of what is replaced (opened for writing meanwhile)
+    let mut folders: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    for d in changed {
+        match d {
+            Differ::Mode(p) => folders.insert(p.clone()),
+            Differ::Path(p) => folders.insert(p.parent().map(Path::to_path_buf).unwrap_or_default()),
+        };
+    }
+    for f in &folders {
+        let mut perm = std::fs::symlink_metadata(root.join(f))?.permissions();
+        perm.set_mode(perm.mode() | 0o700);
+        std::fs::set_permissions(root.join(f), perm)?;
+    }
+    for d in changed {
+        let Differ::Path(p) = d else { continue };
+        let (now, then) = (root.join(p), saved.join(p));
+        match std::fs::symlink_metadata(&now) {
+            Ok(md) if md.is_dir() => remove_tree(&now)?,
+            Ok(_) => std::fs::remove_file(&now)?,
+            Err(e) if e.kind() == NotFound => {}
+            Err(e) => return Err(e),
+        }
+        match std::fs::symlink_metadata(&then) {
+            Ok(md) => copy_entry(&then, &now, md.file_type())?,
+            Err(e) if e.kind() == NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    // deepest first: a parent closed again would lock its children out
+    for f in folders.iter().rev() {
+        std::fs::set_permissions(root.join(f), std::fs::symlink_metadata(saved.join(f))?.permissions())?;
+    }
+    Ok(())
 }
 
 impl Drop for Stage {
@@ -472,7 +503,8 @@ fn writable(dir: &Path) {
 /// Run a preset; returns the output directory.
 pub fn run(a: Args) -> Result<PathBuf> {
     let (dir, m) = load(&a.preset)?;
-    m.pick(&a.part)?;
+    // picked before any work: a wrong --part fails here
+    let parts: Vec<specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
@@ -491,7 +523,6 @@ pub fn run(a: Args) -> Result<PathBuf> {
     )?;
     let (m, sb, red) = (&stage.manifest, &stage.sandbox, &stage.red);
     let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
-    let parts = m.pick(&a.part)?;
 
     let before = Snapshot::take(&sb.root);
     let mut results = Vec::new();
@@ -588,6 +619,62 @@ pub fn run(a: Args) -> Result<PathBuf> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// Every entry under `root`: path, kind and mode, a file's bytes.
+    fn listing(root: &Path) -> Vec<(PathBuf, u32, Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let (p, md) = (e.path(), std::fs::symlink_metadata(e.path()).unwrap());
+                let bytes = if md.is_file() { std::fs::read(&p).unwrap() } else { Vec::new() };
+                out.push((p.strip_prefix(root).unwrap().to_path_buf(), md.permissions().mode(), bytes));
+                if md.is_dir() {
+                    stack.push(p);
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn put_back_undoes_what_a_play_did_and_nothing_else() {
+        // review of #58, 3 and 4: chmod, an edit that kept size and mtime, a
+        // name that is not UTF-8, inside a read-only folder too
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("anina-putback-{}", std::process::id()));
+        let _ = remove_tree(&dir);
+        let (root, saved) = (dir.join("root"), dir.join("saved"));
+        std::fs::create_dir_all(root.join("work/bin")).unwrap();
+        std::fs::create_dir_all(root.join("gocache/m")).unwrap();
+        std::fs::write(root.join("work/bin/run"), "#!/bin/sh").unwrap();
+        std::fs::write(root.join("work/conf"), "aaaa").unwrap();
+        std::fs::write(root.join("gocache/m/go.mod"), "module m").unwrap();
+        std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        copy_tree(&root, &saved).unwrap();
+        let base = Snapshot::take(&root);
+        let want = listing(&saved);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        std::fs::set_permissions(root.join("work/bin/run"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(root.join("work/bin"), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mtime = std::fs::metadata(root.join("work/conf")).unwrap().modified().unwrap();
+        std::fs::write(root.join("work/conf"), "bbbb").unwrap();
+        std::fs::File::options().write(true).open(root.join("work/conf")).unwrap().set_modified(mtime).unwrap();
+        let _ = std::fs::write(root.join("work").join(std::ffi::OsStr::from_bytes(b"caf\xe9")), "x");
+        std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(root.join("gocache/m/extra"), "y").unwrap();
+        std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let mut now = Snapshot::take(&root);
+        let changed = base.differs(&now);
+        put_back(&root, &saved, &changed).unwrap();
+        assert_eq!(listing(&root), want);
+        now.refresh(&root, &changed);
+        assert!(now.differs(&Snapshot::take(&root)).is_empty());
+        remove_tree(&dir).unwrap();
+    }
 
     #[test]
     fn a_tree_with_sockets_fifos_and_read_only_folders_copies_and_goes() {
