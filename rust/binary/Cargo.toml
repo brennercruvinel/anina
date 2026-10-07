@@ -30,3 +30,4 @@ flate2.workspace = true
 libc.workspace = true
 regex.workspace = true
 serde.workspace = true
+serde_json.workspace = true
