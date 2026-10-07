@@ -16,36 +16,43 @@ urna writes truecolor even when the terminal never announced it. Its dimmest pal
 
 Killing a burn training run from its TUI exits with code 101, a deliberate `panic!`. And plain `ls -G` on macOS ignores `NO_COLOR`; its directory blue on black is 2.2:1.
 
+The glow, harlequin and helix presets each ran in seven terminals. harlequin and helix keep every cell colored with `NO_COLOR` set. In glow, 43% of the text sits below WCAG AA in a truecolor terminal. At 80 columns and below, harlequin leaves its editor scrolled to the right after formatting a query, so the formatted text is out of view.
+
 ## What a run prints
 
 `anina run helix` opens helix in an empty sandbox. The tape searches a word and changes it, opens the file picker, then saves and quits, and anina prints this:
 
 ```text
 $ anina run helix
-anina [helix]   ok in 12.6s: 36 frames, 24 screens, 4 shots
+anina [helix] part 1/1 edit · helix: select, change, pick, quit
+anina [helix]   ok in 9.3s: 35 frames, 23 screens, 4 shots
 anina [helix] disk: 9 created, 0 modified, 0 deleted, 604 B written
                    555 B  work/greeter
                     49 B  home/.config
                      0 B  home/.cache
 anina [helix] redacted home path ×1
+anina [helix] -> anina-out/helix/index.html
+anina check: nothing to hide (10 files checked, 4 PNG read through their screen text)
 ```
 
-`anina-out/helix/` gets the animated SVG, four PNGs, the cast, an HTML page and the list of every file helix wrote. The window takes its colors from helix's own screen. Every preset in [`demo/`](demo) works the same way, and `anina presets` lists them.
+Every line pastes as it is: paths show relative to where you ran it, and the last one is `anina check` reading what the run wrote. `anina-out/helix/` gets the animated SVG, four PNGs, the cast, an HTML page and the list of every file helix wrote. The window takes its colors from helix's own screen. Every preset in [`demo/`](demo) works the same way, and `anina presets` lists them.
 
 ## Commands
 
 ```sh
 anina audit -- htop                # five scores, no tape to write
+anina audit --preset glow          # a preset's journey in seven terminals
 anina presets                      # what ships
 anina run shell                    # the smallest journey, no network
 anina init -o demo.tape -- htop    # use htop; ctrl+] stops; demo.tape replays it
 anina record demo.tape             # -> anina-out/demo/demo.svg
 anina explore -- htop              # graph.json, map.md, screens/*.png
 anina check                        # nothing in anina-out you would not publish
+anina compare old-run new-run      # the same result, timing aside
 anina doctor                       # can anina drive a terminal here?
 ```
 
-`audit` runs the same journey in many terminals, with other sizes, color depths, `NO_COLOR` and `LC_ALL=C`. It scores stability, responsiveness and contrast, plus compatibility and terminal hygiene. `explore` is experimental: it reads the key hints on screen, tries them, and maps every screen it reaches. `render` draws a recording again with another theme or speed. `brand` takes a theme from the app's own colors, and `export` writes asciicast v3 for the asciinema player.
+`audit` runs the same journey in many terminals, with other sizes, color depths, `NO_COLOR` and `LC_ALL=C`. It scores stability, responsiveness and contrast, plus compatibility and terminal hygiene. With `--preset`, the sandbox starts over in every terminal, and `--embed` puts the images inside the HTML report. `explore` is experimental: it reads the key hints on screen, tries them, and maps every screen it reaches. `render` draws a recording again with another theme or speed. `brand` takes a theme from the app's own colors, and `export` writes asciicast v3 for the asciinema player.
 
 Tapes are one step per line, and vhs tapes run as they are:
 
@@ -71,7 +78,9 @@ replace = { 'ChatGPT\.app' = "Notes.app" }   # regex = example text
 mask = ['/Applications/[^/ ]+\.app']          # regex, shown as •••, cell for cell
 ```
 
-`anina run` gives every journey a fresh HOME and environment. `--sandbox strict` adds the OS sandbox, `sandbox-exec` on macOS and `bwrap` on Linux, and the program can't write outside it. Before you publish, `anina check` looks through the output for anything that slipped and fails if it finds some.
+`anina run` gives every journey a fresh HOME and environment. `--sandbox strict` adds the OS sandbox, `sandbox-exec` on macOS and `bwrap` on Linux, and the program can't write outside it.
+
+`run`, `record`, `audit` and `explore` end with `anina check` on what they wrote, and it fails the command if something slipped. Each PNG carries the text of the screen it shows, so the check reads screenshots too.
 
 ## Install
 
