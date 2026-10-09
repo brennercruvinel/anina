@@ -109,16 +109,21 @@ fn group(s: &Session) -> Vec<(Out, f64, usize)> {
                 for piece in split_controls(t) {
                     match piece {
                         Piece::Text(p) => {
+                            let mask = union(&s.volatile, &inp.quiet);
+                            // `/` or `:` that opened a field (a filter's bar,
+                            // a prompt) is a step of its own, waited on before
+                            // the text goes in, however fast the text followed
+                            let opened = matches!(out.last(), Some((Out::Type(t), _, _))
+                                if t.chars().count() == 1 && !t.chars().all(char::is_alphanumeric))
+                                && last_text_end.is_some_and(|(_, li)| {
+                                    changed_elsewhere(&s.inputs[li].before, &inp.before, &mask) != Some(0)
+                                });
                             let continues = first
+                                && !opened
                                 && matches!(out.last(), Some((Out::Type(_), _, _)))
                                 && last_text_end.is_some_and(|(lt, li)| {
                                     inp.t - lt < TYPING_GAP
-                                        || inp.t - lt < 1.5
-                                            && typing_only(
-                                                &s.inputs[li].before,
-                                                &inp.before,
-                                                &union(&s.volatile, &inp.quiet),
-                                            )
+                                        || inp.t - lt < 1.5 && typing_only(&s.inputs[li].before, &inp.before, &mask)
                                 });
                             if continues {
                                 if let Some((Out::Type(prev), _, _)) = out.last_mut() {
@@ -180,16 +185,22 @@ fn split_controls(t: &str) -> Vec<Piece> {
 /// echo of typing, maybe a hint or a counter), volatile cells aside? A new
 /// screen (a key that opened something) changes far more.
 fn typing_only(a: &Screen, b: &Screen, volatile: &Mask) -> bool {
+    changed_elsewhere(a, b, volatile).is_some_and(|n| n * 10 <= a.cols as usize * a.rows as usize)
+}
+
+/// Cells that changed off both screens' cursor rows, volatile cells aside;
+/// None when the sizes differ.
+fn changed_elsewhere(a: &Screen, b: &Screen, volatile: &Mask) -> Option<usize> {
     if a.cols != b.cols || a.rows != b.rows {
-        return false;
+        return None;
     }
     let d = a.diff(b);
-    let elsewhere = (0..a.rows)
+    let n = (0..a.rows)
         .filter(|y| *y != a.cursor.y && *y != b.cursor.y)
         .flat_map(|y| (0..a.cols).map(move |x| (x, y)))
         .filter(|(x, y)| d.get(*x, *y) && !volatile.get(*x, *y))
         .count();
-    elsewhere * 10 <= a.cols as usize * a.rows as usize
+    Some(n)
 }
 
 /// A text segment of one row, with the columns it covers.
@@ -824,6 +835,50 @@ mod tests {
         let b = screen(&["alpha", "beta install", "gamma", "pattern found", "/install"]);
         assert_eq!(a.cursor.y, 0);
         assert_eq!(sync(&a, &b, Some(&Out::Type("/install".into()))), ["Wait /install", "Wait 'pattern found'"]);
+    }
+
+    fn session(inputs: Vec<(f64, &str, Screen)>, last: Screen) -> Session {
+        let (cols, rows) = (last.cols, last.rows);
+        Session {
+            cols,
+            rows,
+            argv: vec!["glow".into()],
+            cwd: None,
+            env: Vec::new(),
+            clean_env: false,
+            inputs: inputs
+                .into_iter()
+                .map(|(t, text, before)| Input { t, ev: Ev::Text(text.into()), before, quiet: Mask::new(cols, rows) })
+                .collect(),
+            resizes: Vec::new(),
+            end: 3.0,
+            last,
+            last_quiet: Mask::new(cols, rows),
+            volatile: Mask::new(cols, rows),
+        }
+    }
+
+    #[test]
+    fn a_key_that_opens_a_field_is_a_step_of_its_own() {
+        // review of #70, 7: `/` then `install` under 0.25 s apart was one Type
+        let list = screen(&["  roadmap.md", "  install-guide.md", "  contributing.md", "", "  / filter"]);
+        let bar =
+            screen(&["  roadmap.md", "  install-guide.md", "  contributing.md", "enter open • esc cancel", "  Find: "]);
+        let typed =
+            |t: &str| screen(&["  install-guide.md", "", "", "enter open • esc cancel", &format!("  Find: {t}")]);
+        let s = session(
+            vec![(1.0, "/", list.clone()), (1.1, "i", bar.clone()), (1.15, "nstall", typed("i"))],
+            typed("install"),
+        );
+        let steps: Vec<Out> = group(&s).into_iter().map(|g| g.0).collect();
+        assert_eq!(steps, [Out::Type("/".into()), Out::Type("install".into())]);
+        let tape = write(&s);
+        assert!(tape.contains("Type '/'\nWait 'enter open • esc cancel'\nType"), "{tape}");
+        // a path typed at a prompt stays one Type: only the cursor row changed
+        let p = |t: &str| screen(&["$ ls", "a.txt", &format!("$ {t}")]);
+        let s = session(vec![(1.0, "/", p("")), (1.1, "usr/bin", p("/"))], p("/usr/bin"));
+        let steps: Vec<Out> = group(&s).into_iter().map(|g| g.0).collect();
+        assert_eq!(steps, [Out::Type("/usr/bin".into())]);
     }
 
     #[test]
