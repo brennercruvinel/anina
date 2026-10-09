@@ -13,9 +13,6 @@ Why anina is built the way it is. `kind: decision` records a choice between opti
 | [0007](0007-nothing-about-one-program-in-the-core.md) | decision | Nothing about any one program in the core; programs live in presets |
 | [0008](0008-mask-what-changes-by-itself.md) | decision | Mask the cells that change by themselves |
 | [0009](0009-one-folder-per-run-with-stable-names.md) | decision | One output folder per run, with stable screen names |
-| [0010](0010-equal-length-siblings-and-a-shared-lexicon.md) | decision | Equal-length siblings and a shared lexicon |
-| [0011](0011-a-design-system-read-from-the-screen.md) | decision | A design system read from the screen |
-| [0012](0012-one-timeline-many-writers.md) | decision | One timeline, many writers |
 | [0013](0013-a-workspace-of-layered-crates.md) | decision | Split anina into a workspace of layered crates |
 | [0014](0014-code-and-cli-speak-to-different-readers.md) | decision | The code and the CLI speak to different readers |
 | [0015](0015-waits-that-hold-until-the-program-answered.md) | lesson | A written wait holds until the program answered, in every terminal |
