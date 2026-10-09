@@ -433,9 +433,12 @@ fn put_back(root: &Path, saved: &Path, changed: &[Differ]) -> std::io::Result<()
             Err(e) => return Err(e),
         }
     }
-    // deepest first: a parent closed again would lock its children out
+    // deepest first: a parent closed again would lock its children out;
+    // putting its entries back moved its mtime
     for f in folders.iter().rev() {
-        std::fs::set_permissions(root.join(f), std::fs::symlink_metadata(saved.join(f))?.permissions())?;
+        let md = std::fs::symlink_metadata(saved.join(f))?;
+        keep_times(&md, &root.join(f));
+        std::fs::set_permissions(root.join(f), md.permissions())?;
     }
     Ok(())
 }
@@ -455,7 +458,22 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         let e = e?;
         copy_entry(&e.path(), &to.join(e.file_name()), e.file_type()?)?;
     }
-    std::fs::set_permissions(to, std::fs::metadata(from)?.permissions())
+    // after the entries: writing them moved the folder's mtime
+    let md = std::fs::metadata(from)?;
+    keep_times(&md, to);
+    std::fs::set_permissions(to, md.permissions())
+}
+
+/// Give `to` the times in `md`. Build tools tell what to redo by mtime
+/// (cargo, make, tsc): a file put back with a new one is built again in
+/// every terminal. `fs::copy` keeps a file's times only where it clones
+/// (APFS), and never a folder's. Best effort: a file that can't be opened
+/// for reading keeps its new time.
+fn keep_times(md: &std::fs::Metadata, to: &Path) {
+    let (Ok(m), Ok(a)) = (md.modified(), md.accessed()) else { return };
+    if let Ok(f) = std::fs::File::open(to) {
+        let _ = f.set_times(std::fs::FileTimes::new().set_modified(m).set_accessed(a));
+    }
 }
 
 fn copy_entry(src: &Path, dst: &Path, t: std::fs::FileType) -> std::io::Result<()> {
@@ -467,7 +485,9 @@ fn copy_entry(src: &Path, dst: &Path, t: std::fs::FileType) -> std::io::Result<(
     } else if t.is_socket() || t.is_fifo() || t.is_block_device() || t.is_char_device() {
         Ok(())
     } else {
-        std::fs::copy(src, dst).map(|_| ())
+        std::fs::copy(src, dst)?;
+        keep_times(&std::fs::metadata(src)?, dst);
+        Ok(())
     }
 }
 
@@ -620,15 +640,16 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
-    /// Every entry under `root`: path, kind and mode, a file's bytes.
-    fn listing(root: &Path) -> Vec<(PathBuf, u32, Vec<u8>)> {
+    /// Every entry under `root`: path, mode and mtime (links aside), a file's bytes.
+    fn listing(root: &Path) -> Vec<(PathBuf, u32, Option<std::time::SystemTime>, Vec<u8>)> {
         let mut out = Vec::new();
         let mut stack = vec![root.to_path_buf()];
         while let Some(d) = stack.pop() {
             for e in std::fs::read_dir(&d).unwrap().flatten() {
                 let (p, md) = (e.path(), std::fs::symlink_metadata(e.path()).unwrap());
                 let bytes = if md.is_file() { std::fs::read(&p).unwrap() } else { Vec::new() };
-                out.push((p.strip_prefix(root).unwrap().to_path_buf(), md.permissions().mode(), bytes));
+                let mtime = (!md.is_symlink()).then(|| md.modified().unwrap());
+                out.push((p.strip_prefix(root).unwrap().to_path_buf(), md.permissions().mode(), mtime, bytes));
                 if md.is_dir() {
                     stack.push(p);
                 }
@@ -651,10 +672,18 @@ mod tests {
         std::fs::write(root.join("work/bin/run"), "#!/bin/sh").unwrap();
         std::fs::write(root.join("work/conf"), "aaaa").unwrap();
         std::fs::write(root.join("gocache/m/go.mod"), "module m").unwrap();
+        // a build in the next terminal compares these times
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_577_836_800);
+        for p in ["work/conf", "work/bin/run", "work/bin", "work"] {
+            let f = std::fs::File::open(root.join(p)).unwrap();
+            f.set_times(std::fs::FileTimes::new().set_modified(old).set_accessed(old)).unwrap();
+        }
         std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
         copy_tree(&root, &saved).unwrap();
         let base = Snapshot::take(&root);
         let want = listing(&saved);
+        assert_eq!(want, listing(&root), "freeze keeps every time");
         std::thread::sleep(std::time::Duration::from_millis(20));
 
         std::fs::set_permissions(root.join("work/bin/run"), std::fs::Permissions::from_mode(0o755)).unwrap();
