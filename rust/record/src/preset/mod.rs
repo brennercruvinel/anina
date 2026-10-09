@@ -359,7 +359,7 @@ impl Stage {
     }
 
     fn pristine(&self) -> PathBuf {
-        self.sandbox.root.with_extension("pristine")
+        pristine_of(&self.sandbox.root)
     }
 
     /// Keep the sandbox as it is now (after prepare), to start every later
@@ -396,6 +396,15 @@ impl Stage {
         self.base.replace(now);
         Ok(())
     }
+}
+
+/// Where `freeze` keeps a sandbox: `pristine/<name>` next to
+/// `sandbox/<name>`, the whole name kept (`with_extension` would give
+/// `audit-tool.a` and `audit-tool.b` the same copy) and out of the sandboxes'
+/// folder (a preset named `x.pristine` can't land on it).
+fn pristine_of(root: &Path) -> PathBuf {
+    let name = root.file_name().unwrap_or_default();
+    root.parent().and_then(Path::parent).unwrap_or(Path::new(".")).join("pristine").join(name)
 }
 
 /// Each path that differs, as `saved` holds it: gone when it isn't there,
@@ -658,6 +667,16 @@ mod tests {
         }
         out.sort();
         out
+    }
+
+    #[test]
+    fn every_sandbox_has_a_saved_copy_of_its_own() {
+        // review of #70, 8
+        let sb = Path::new("/cache/anina/sandbox");
+        let (a, b) = (pristine_of(&sb.join("audit-tool.a")), pristine_of(&sb.join("audit-tool.b")));
+        assert_ne!(a, b);
+        assert_eq!(a, Path::new("/cache/anina/pristine/audit-tool.a"));
+        assert_ne!(pristine_of(&sb.join("x")), sb.join("x.pristine"));
     }
 
     #[test]
