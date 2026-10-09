@@ -40,7 +40,7 @@ A `Snapshot` (kind, size, mtime, ctime and mode per path, the path kept as bytes
 
 ## Decision
 
-Put back only what changed, and skip the first restore. A file differs on any change of size, mtime, ctime or mode. The ctime moves on every write, chmod or rename, and no program can set it back, so an edit that keeps size and mtime still shows. After putting back, only the paths it touched are read again. Putting back fails on anything but a missing path, and then the whole tree is copied again as before. Sockets, FIFOs and devices are not copied, because they belong to the process that made them. Folders keep their permissions, and deleting a tree gives every folder back its owner's write bit first.
+Put back only what changed, and skip the first restore. A file differs on any change of size, mtime, ctime or mode. The ctime moves on every write, chmod or rename, and no program can set it back, so an edit that keeps size and mtime still shows. After putting back, only the paths it touched are read again. Putting back fails on anything but a missing path, and then the whole tree is copied again as before. Sockets, FIFOs and devices are not copied, because they belong to the process that made them. Folders keep their permissions, files and folders keep their times (build tools redo what looks newer: `fs::copy` keeps a file's mtime only where it clones, a folder's never), and deleting a tree gives every folder back its owner's write bit first. The saved copy lives at `pristine/<name>` next to `sandbox/<name>`, so no two sandboxes share one.
 
 ## Consequences
 
@@ -63,4 +63,5 @@ Put back only what changed, and skip the first restore. A file differs on any ch
 - `rust/record/src/preset/mod.rs` (`Stage::freeze`, `Stage::restore`, `copy_tree`, `remove_tree`)
 - `rust/record/src/cordon/diffs.rs` (`Snapshot::differs`)
 - Review of #58: #59 and its sub-issues #60 to #68
+- Review of #70: #84 and its sub-issues #85 to #96
 - ADR-0006

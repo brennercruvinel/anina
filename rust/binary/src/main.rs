@@ -55,8 +55,15 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    if let Err(e) = dispatch(cli.cmd) {
+    let ran = dispatch(cli.cmd);
+    // what the command wrote is checked whether it worked or not: a failed
+    // wait leaves its screen in failed.txt and failed.ansi
+    let checked = checks::verify_written();
+    let failed: Vec<anyhow::Error> = [ran.err(), checked.err()].into_iter().flatten().collect();
+    for e in &failed {
         eprintln!("anina: {}", redact::Redactor::shared().quiet(&format!("{e:#}")));
+    }
+    if !failed.is_empty() {
         std::process::exit(1);
     }
 }
@@ -65,9 +72,9 @@ fn dispatch(cmd: Cmd) -> Result<()> {
     checks::mark_start();
     redact::init()?;
     match cmd {
-        Cmd::Run(a) => preset::run(a).and_then(|out| checks::verify(&out)),
+        Cmd::Run(a) => preset::run(a).map(|_| ()),
         Cmd::Presets => preset::list(),
-        Cmd::Record(a) => record::run(a).and_then(|out| checks::verify(&out)),
+        Cmd::Record(a) => record::run(a).map(|_| ()),
         Cmd::Render(a) => render::run(a),
         Cmd::Explore(a) => mapper::run(a),
         Cmd::Init(a) => taping::run(a),

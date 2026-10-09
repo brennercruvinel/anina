@@ -20,8 +20,8 @@ pub struct Args {
 
 /// Report fields that hold time or sampling, never compared: the run's
 /// clock (`recorded`, `generated`), its durations, its frame counts and the
-/// latencies measured from them.
-const TIMING_KEYS: [&str; 9] = [
+/// latencies measured from them (`latency_ms` in an exploration's graph).
+const TIMING_KEYS: [&str; 10] = [
     "seconds",
     "recorded",
     "generated",
@@ -31,11 +31,44 @@ const TIMING_KEYS: [&str; 9] = [
     "first_screen_s",
     "duration_s",
     "latency",
+    "latency_ms",
+];
+
+/// Report fields measured over the screens the run happened to sample: a
+/// frame caught mid-redraw adds colored cells, moves a contrast count or
+/// picks another "fullest" screen, and how long a screen was watched decides
+/// which cells count as volatile. Shown side by side when they differ, not
+/// judged.
+const SAMPLED_KEYS: [&str; 8] = [
+    "colored_cells",
+    "truecolor_cells",
+    "beyond16_cells",
+    "visible_cells",
+    "used_rows",
+    "used_cols",
+    "contrast",
+    "volatile_cells",
 ];
 
 /// Audit scores computed from those timings: their number and explanation
 /// move with the clock, so only their category and rule are compared.
 const TIMED_SCORES: [&str; 1] = ["responsiveness"];
+
+/// Audit scores computed over sampled screens, and how far apart two runs
+/// may put them: sampling moves readability by a few points, a new theme
+/// moves it by tens. Within the margin it's a note; past it, a difference.
+const CLOSE_SCORES: [(&str, i64); 1] = [("readability", 5)];
+
+/// Audit scores whose verdict holds but whose explanation quotes sampled
+/// counts ("3 of 1775 visible cells colored"): the explanation is not
+/// compared. Each terminal's verdict is, in `colors_respected`.
+const QUOTING_SCORES: [&str; 1] = ["compatibility"];
+
+/// The screenshot an audit picks per terminal, the fullest screen it
+/// sampled: `terminals/<name>/screen.png`.
+fn sampled_png(f: &str) -> bool {
+    f.ends_with("/screen.png") && (f.starts_with("terminals/") || f.contains("/terminals/"))
+}
 
 /// `[4.7s]` in a transcript: when a step happened.
 static STAMP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d+(?:\.\d+)?s\]").unwrap());
@@ -47,7 +80,10 @@ struct Tally {
     reports: usize,
     bytes: usize,
     timed: usize,
+    sampled: usize,
     diffs: Vec<String>,
+    /// Sampled measures that differ, shown and not judged.
+    notes: Vec<String>,
 }
 
 pub fn run(a: Args) -> Result<()> {
@@ -68,12 +104,12 @@ pub fn run(a: Args) -> Result<()> {
         compare(f, &std::fs::read(a.a.join(f))?, &std::fs::read(a.b.join(f))?, &mut t);
     }
     let both = fa.intersection(&fb).count();
-    for line in sampling(&a.a, &a.b) {
+    for line in sampling(&a.a, &a.b).iter().chain(&t.notes) {
         eprintln!("  {line}");
     }
     let summary = format!(
-        "{both} files: {} texts, {} PNG by pixels, {} reports, {} by bytes; {} timing-bound, present on both sides",
-        t.texts, t.pngs, t.reports, t.bytes, t.timed
+        "{both} files: {} texts, {} PNG by pixels, {} reports, {} by bytes; {} timing-bound and {} sampled, present on both sides",
+        t.texts, t.pngs, t.reports, t.bytes, t.timed, t.sampled
     );
     if t.diffs.is_empty() {
         eprintln!("anina compare: same ({summary})");
@@ -90,13 +126,22 @@ fn compare(f: &str, a: &[u8], b: &[u8], t: &mut Tally) {
     let same = if f.ends_with(".txt") {
         t.texts += 1;
         untimed(a) == untimed(b)
+    } else if sampled_png(f) {
+        t.sampled += 1;
+        true
     } else if f.ends_with(".png") {
         t.pngs += 1;
         pixels(a) == pixels(b)
     } else if f.ends_with(".json") && !f.ends_with(".cast.json") {
         t.reports += 1;
-        match (report(a), report(b)) {
-            (Some(x), Some(y)) => x == y,
+        match (serde_json::from_slice(a), serde_json::from_slice(b)) {
+            (Ok(mut x), Ok(mut y)) => {
+                sampled_notes(f, "", &x, &y, &mut t.notes);
+                let close = close_scores(f, &x, &y, &mut t.diffs, &mut t.notes);
+                strip(&mut x);
+                strip(&mut y);
+                close && x == y
+            }
             _ => a == b,
         }
     } else if f.ends_with(".svg") || f.ends_with(".gz") || f.ends_with(".html") || f.ends_with(".cast") {
@@ -139,7 +184,7 @@ fn untimed(b: &[u8]) -> String {
 
 /// A PNG without its text chunks: what it draws, not what it says.
 fn pixels(png: &[u8]) -> Vec<u8> {
-    let chunks = crate::checks::png_chunks(png);
+    let chunks = anina_render::pixel::png_chunks(png);
     if chunks.is_empty() {
         return png.to_vec();
     }
@@ -151,6 +196,7 @@ fn pixels(png: &[u8]) -> Vec<u8> {
 }
 
 /// A JSON report with every timing field taken out.
+#[cfg(test)]
 fn report(b: &[u8]) -> Option<serde_json::Value> {
     let mut v: serde_json::Value = serde_json::from_slice(b).ok()?;
     strip(&mut v);
@@ -160,13 +206,84 @@ fn report(b: &[u8]) -> Option<serde_json::Value> {
 fn strip(v: &mut serde_json::Value) {
     match v {
         serde_json::Value::Object(m) => {
-            m.retain(|k, _| !TIMING_KEYS.contains(&k.as_str()));
-            if m.get("category").and_then(|c| c.as_str()).is_some_and(|c| TIMED_SCORES.contains(&c)) {
-                m.retain(|k, _| k == "category" || k == "rule");
+            m.retain(|k, _| !TIMING_KEYS.contains(&k.as_str()) && !SAMPLED_KEYS.contains(&k.as_str()));
+            match m.get("category").and_then(|c| c.as_str()) {
+                Some(c) if TIMED_SCORES.contains(&c) || CLOSE_SCORES.iter().any(|(n, _)| *n == c) => {
+                    m.retain(|k, _| k == "category" || k == "rule")
+                }
+                Some(c) if QUOTING_SCORES.contains(&c) => {
+                    m.remove("explain");
+                }
+                _ => {}
             }
             m.values_mut().for_each(strip);
         }
         serde_json::Value::Array(a) => a.iter_mut().for_each(strip),
+        _ => {}
+    }
+}
+
+/// The scores in `CLOSE_SCORES`, compared within their margin. A gap past
+/// it goes to `diffs`, a smaller one to `notes`; false when any went past.
+fn close_scores(
+    file: &str,
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    diffs: &mut Vec<String>,
+    notes: &mut Vec<String>,
+) -> bool {
+    let score = |v: &serde_json::Value, cat: &str| {
+        v["scores"].as_array()?.iter().find(|s| s["category"] == cat).map(|s| s["score"].as_i64())
+    };
+    let mut close = true;
+    for (cat, margin) in CLOSE_SCORES {
+        let (Some(x), Some(y)) = (score(a, cat), score(b, cat)) else { continue };
+        if x == y {
+            continue;
+        }
+        let shown = |s: Option<i64>| s.map_or("none".to_string(), |n| n.to_string());
+        let line = format!("{file} {cat}: {} vs {}", shown(x), shown(y));
+        match (x, y) {
+            (Some(x), Some(y)) if (x - y).abs() <= margin => {
+                notes.push(format!("{line} (within {margin}, not judged)"))
+            }
+            _ => {
+                diffs.push(format!("differs: {line}"));
+                close = false;
+            }
+        }
+    }
+    close
+}
+
+/// A line per sampled measure that differs between `a` and `b` (same
+/// shape), named by where it sits: `report.json 60x20-truecolor
+/// colored_cells: 1325 vs 1323`.
+fn sampled_notes(file: &str, at: &str, a: &serde_json::Value, b: &serde_json::Value, out: &mut Vec<String>) {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            // an audit's terminal names itself
+            let name = x.get("variant").and_then(|v| v.get("name")).and_then(Value::as_str);
+            let here = name.map_or(at.to_string(), |n| format!("{at} {n}"));
+            for (k, va) in x {
+                let Some(vb) = y.get(k) else { continue };
+                if SAMPLED_KEYS.contains(&k.as_str()) {
+                    if va != vb {
+                        let show = |v: &Value| if v.is_object() { "…".to_string() } else { v.to_string() };
+                        let vs = if va.is_object() {
+                            "differs".to_string()
+                        } else {
+                            format!("{} vs {}", show(va), show(vb))
+                        };
+                        out.push(format!("{file}{here} {k}: {vs} (sampled, not compared)"));
+                    }
+                } else {
+                    sampled_notes(file, &here, va, vb, out);
+                }
+            }
+        }
+        (Value::Array(x), Value::Array(y)) => x.iter().zip(y).for_each(|(va, vb)| sampled_notes(file, at, va, vb, out)),
         _ => {}
     }
 }
@@ -224,6 +341,56 @@ mod tests {
         assert_eq!(report(a), report(b));
         let c = br#"{"generated":"x","scores":[{"category":"stability","score":50,"rule":"s","explain":["broke"]}],"variants":[]}"#;
         assert_ne!(report(a), report(c));
+    }
+
+    #[test]
+    fn sampled_measures_are_shown_not_judged() {
+        // review of #70, 3 and 4
+        let a = br#"{"scores":[{"category":"readability","score":93,"rule":"r","explain":["145 of 1778"]},{"category":"compatibility","score":100,"rule":"c","explain":["3 of 2050 colored"]}],"variants":[{"variant":{"name":"120x40-16"},"status":"ok","colored_cells":1325,"visible_cells":2050,"contrast":{"text_cells":1778}}]}"#;
+        let b = br#"{"scores":[{"category":"readability","score":94,"rule":"r","explain":["139 of 1775"]},{"category":"compatibility","score":100,"rule":"c","explain":["3 of 2047 colored"]}],"variants":[{"variant":{"name":"120x40-16"},"status":"ok","colored_cells":1323,"visible_cells":2047,"contrast":{"text_cells":1775}}]}"#;
+        assert_eq!(report(a), report(b));
+        let mut notes = Vec::new();
+        let (x, y) = (serde_json::from_slice(a).unwrap(), serde_json::from_slice(b).unwrap());
+        sampled_notes("report.json", "", &x, &y, &mut notes);
+        assert!(
+            notes.contains(&"report.json 120x40-16 colored_cells: 1325 vs 1323 (sampled, not compared)".to_string()),
+            "{notes:?}"
+        );
+        // a verdict that changes still counts
+        let c = String::from_utf8_lossy(b).replace(r#""score":100"#, r#""score":75"#);
+        assert_ne!(report(a), report(c.as_bytes()));
+        // two explorations: latency and volatile cells move, the graph does not
+        let g1 = br#"{"states":[{"id":0,"title":"Main","volatile_cells":12}],"edges":[{"from":0,"to":1,"key":"j","latency_ms":34}]}"#;
+        let g2 = br#"{"states":[{"id":0,"title":"Main","volatile_cells":9}],"edges":[{"from":0,"to":1,"key":"j","latency_ms":51}]}"#;
+        assert_eq!(report(g1), report(g2));
+        assert!(sampled_png("terminals/60x20-truecolor/screen.png") && !sampled_png("shell/01-start.png"));
+    }
+
+    #[test]
+    fn a_theme_that_drops_readability_or_colors_is_a_difference() {
+        // review of #97, 2: the sampled counts are noise, the verdicts are not
+        let rep = |read: i64, nocolor: bool, c16: bool| {
+            format!(
+                r#"{{"scores":[{{"category":"readability","score":{read},"rule":"r","explain":["x"]}},{{"category":"compatibility","score":75,"rule":"c","explain":["y"]}}],"variants":[{{"variant":{{"name":"120x40-nocolor"}},"colors_respected":{nocolor},"colored_cells":3}},{{"variant":{{"name":"120x40-16"}},"colors_respected":{c16},"beyond16_cells":0}}]}}"#
+            )
+        };
+        let run = |a: &str, b: &str| {
+            let mut t = Tally::default();
+            compare("report.json", a.as_bytes(), b.as_bytes(), &mut t);
+            t
+        };
+        let t = run(&rep(95, true, false), &rep(30, true, false));
+        assert!(t.diffs.contains(&"differs: report.json readability: 95 vs 30".to_string()), "{:?}", t.diffs);
+        let t = run(&rep(93, true, false), &rep(94, true, false));
+        assert!(t.diffs.is_empty(), "{:?}", t.diffs);
+        assert!(
+            t.notes.contains(&"report.json readability: 93 vs 94 (within 5, not judged)".to_string()),
+            "{:?}",
+            t.notes
+        );
+        // the same 3 of 4, failed in another terminal
+        let t = run(&rep(90, false, true), &rep(90, true, false));
+        assert_eq!(t.diffs, ["differs: report.json"]);
     }
 
     #[test]

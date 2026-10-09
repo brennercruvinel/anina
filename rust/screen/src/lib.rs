@@ -136,6 +136,27 @@ impl Pattern {
     }
 }
 
+/// A screen read the ways a literal wait reads it: row by row, rows joined
+/// by spaces (text a program wrapped), rows joined where the terminal wrapped
+/// them.
+#[derive(Clone, Debug)]
+pub struct Views([String; 3]);
+
+impl Views {
+    /// Whether a literal `Wait t` passes.
+    pub fn shows(&self, t: &str) -> bool {
+        !t.is_empty() && self.0.iter().any(|v| v.contains(t))
+    }
+
+    /// How many times `t` shows, in the view that shows it most.
+    pub fn count(&self, t: &str) -> usize {
+        if t.is_empty() {
+            return 0;
+        }
+        self.0.iter().map(|v| v.matches(t).count()).max().unwrap_or(0)
+    }
+}
+
 impl Screen {
     pub fn blank(cols: u16, rows: u16) -> Self {
         Screen { cols, rows, cells: vec![Cell::default(); cols as usize * rows as usize], cursor: Cursor::default() }
@@ -201,26 +222,22 @@ impl Screen {
         self.cols > 0 && y < self.rows && self.cell(self.cols - 1, y).ch != " "
     }
 
-    /// The ways a literal wait reads the screen: row by row, rows joined by
-    /// spaces (text a program wrapped), rows joined where the terminal
-    /// wrapped them.
-    fn views(&self) -> [String; 3] {
-        [self.text(), self.text_flat(), self.text_unwrapped()]
+    /// The ways a literal wait reads this screen, computed once: ask `Views`
+    /// as many times as needed instead of the screen.
+    pub fn views(&self) -> Views {
+        Views([self.text(), self.text_flat(), self.text_unwrapped()])
     }
 
     /// Whether a literal `Wait t` passes on this screen. `anina init` asks
     /// the same question when it picks a wait, so what it writes and what the
     /// replay sees cannot disagree.
     pub fn shows(&self, t: &str) -> bool {
-        !t.is_empty() && self.views().iter().any(|v| v.contains(t))
+        self.views().shows(t)
     }
 
     /// How many times `t` shows, in the view that shows it most.
     pub fn count_shown(&self, t: &str) -> usize {
-        if t.is_empty() {
-            return 0;
-        }
-        self.views().iter().map(|v| v.matches(t).count()).max().unwrap_or(0)
+        self.views().count(t)
     }
 
     /// The number of rows up to the last one that holds anything visible.

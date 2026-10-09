@@ -3,13 +3,15 @@
 //! embedded JetBrains Mono, the system fonts cover what it lacks.
 //!
 //! The PNG also carries the screen's text in an `iTXt` chunk (keyword
-//! `anina-screen`), so `anina check` can read what the pixels show.
+//! `anina-screen`), so `anina check` can read what the pixels show. Writing
+//! that chunk and reading a PNG's chunks back both live here.
 
 use super::shape::render_screen;
 use super::theme::Theme;
 use anina_screen::Screen;
 use anyhow::{Context, Result, anyhow};
 use resvg::{tiny_skia, usvg};
+use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -65,23 +67,73 @@ fn with_itxt(png: &[u8], key: &str, text: &str) -> Result<Vec<u8>> {
     chunk.extend_from_slice(&u32::try_from(data.len())?.to_be_bytes());
     chunk.extend_from_slice(b"iTXt");
     chunk.extend_from_slice(&data);
-    chunk.extend_from_slice(&crc32(&chunk[4..]).to_be_bytes());
+    chunk.extend_from_slice(&crc32fast::hash(&chunk[4..]).to_be_bytes());
     let mut out = png[..iend].to_vec();
     out.extend_from_slice(&chunk);
     out.extend_from_slice(&png[iend..]);
     Ok(out)
 }
 
-/// The CRC-32 PNG chunks end with (ISO-HDLC, as in zlib).
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut c = 0xffff_ffffu32;
-    for &b in bytes {
-        c ^= u32::from(b);
-        for _ in 0..8 {
-            c = if c & 1 == 1 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
-        }
+pub const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+/// A PNG's chunks as (kind, data), in order, up to IEND or the first one
+/// that runs past the end. Empty when `png` is not a PNG.
+pub fn png_chunks(png: &[u8]) -> Vec<(&[u8], &[u8])> {
+    let mut out = Vec::new();
+    if !png.starts_with(PNG_SIGNATURE) {
+        return out;
     }
-    !c
+    let mut at = PNG_SIGNATURE.len();
+    while at + 12 <= png.len() {
+        let len = u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]) as usize;
+        let kind = &png[at + 4..at + 8];
+        let Some(data) = png.get(at + 8..at + 8 + len) else { break };
+        out.push((kind, data));
+        if kind == b"IEND" {
+            break;
+        }
+        at += 12 + len;
+    }
+    out
+}
+
+/// The text of every tEXt, zTXt and iTXt chunk of a PNG, joined by lines.
+/// A chunk that does not parse is left out; the rest still counts.
+pub fn png_text(png: &[u8]) -> String {
+    let text: Vec<String> = png_chunks(png)
+        .into_iter()
+        .filter_map(|(kind, data)| match kind {
+            b"tEXt" => data.splitn(2, |b| *b == 0).nth(1).map(latin1),
+            b"zTXt" => {
+                data.splitn(2, |b| *b == 0).nth(1).and_then(|r| r.get(1..)).and_then(inflate).map(|b| latin1(&b))
+            }
+            b"iTXt" => itxt(data),
+            _ => None,
+        })
+        .collect();
+    text.join("\n")
+}
+
+/// keyword NUL flag method language NUL translated NUL text
+fn itxt(data: &[u8]) -> Option<String> {
+    let mut parts = data.splitn(2, |b| *b == 0);
+    parts.next()?;
+    let rest = parts.next()?;
+    let (flag, rest) = (*rest.first()?, rest.get(2..)?);
+    let mut fields = rest.splitn(3, |b| *b == 0);
+    let (_lang, _translated, text) = (fields.next()?, fields.next()?, fields.next()?);
+    let text = if flag == 1 { inflate(text)? } else { text.to_vec() };
+    String::from_utf8(text).ok()
+}
+
+fn inflate(z: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    flate2::read::ZlibDecoder::new(z).read_to_end(&mut out).ok()?;
+    Some(out)
+}
+
+fn latin1(b: &[u8]) -> String {
+    b.iter().map(|&c| c as char).collect()
 }
 
 /// Write `screen` as a PNG with a window titled `title`, in `theme`.
@@ -106,8 +158,8 @@ mod tests {
 
     #[test]
     fn crc_matches_zlib() {
-        assert_eq!(crc32(b"IEND"), 0xae42_6082);
-        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+        assert_eq!(crc32fast::hash(b"IEND"), 0xae42_6082);
+        assert_eq!(crc32fast::hash(b"123456789"), 0xcbf4_3926);
     }
 
     #[test]
@@ -120,6 +172,10 @@ mod tests {
         let at = png.windows(4).position(|w| w == b"iTXt").unwrap();
         assert!(png[at..].windows(11).any(|w| w == b"title\nhello"));
         assert_eq!(&png[png.len() - 8..png.len() - 4], b"IEND");
+        // and it reads back, every chunk's CRC whole
+        assert_eq!(png_text(&png), "title\nhello");
+        let kinds: Vec<&[u8]> = png_chunks(&png).into_iter().map(|c| c.0).collect();
+        assert_eq!(kinds.last(), Some(&&b"IEND"[..]));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

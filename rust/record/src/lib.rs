@@ -538,6 +538,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
     let name = a.tape.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned());
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
     std::fs::create_dir_all(&out)?;
+    anina_runner::redact::writes_to(&out);
     let mut vars = anina_runner::script::base_vars(&a.tape, &out);
     for kv in &a.vars {
         let (k, v) = kv.split_once('=').ok_or_else(|| anyhow!("--var takes K=V"))?;
