@@ -50,13 +50,18 @@ const SAMPLED_KEYS: [&str; 8] = [
     "volatile_cells",
 ];
 
-/// Audit scores computed from those timings or samples: their number and
-/// explanation move with the clock, so only their category and rule are
-/// compared.
-const TIMED_SCORES: [&str; 2] = ["responsiveness", "readability"];
+/// Audit scores computed from those timings: their number and explanation
+/// move with the clock, so only their category and rule are compared.
+const TIMED_SCORES: [&str; 1] = ["responsiveness"];
+
+/// Audit scores computed over sampled screens, and how far apart two runs
+/// may put them: sampling moves readability by a few points, a new theme
+/// moves it by tens. Within the margin it's a note; past it, a difference.
+const CLOSE_SCORES: [(&str, i64); 1] = [("readability", 5)];
 
 /// Audit scores whose verdict holds but whose explanation quotes sampled
-/// counts ("3 of 1775 visible cells colored"): the explanation is not compared.
+/// counts ("3 of 1775 visible cells colored"): the explanation is not
+/// compared. Each terminal's verdict is, in `colors_respected`.
 const QUOTING_SCORES: [&str; 1] = ["compatibility"];
 
 /// The screenshot an audit picks per terminal, the fullest screen it
@@ -129,11 +134,14 @@ fn compare(f: &str, a: &[u8], b: &[u8], t: &mut Tally) {
         pixels(a) == pixels(b)
     } else if f.ends_with(".json") && !f.ends_with(".cast.json") {
         t.reports += 1;
-        if let (Ok(x), Ok(y)) = (serde_json::from_slice(a), serde_json::from_slice(b)) {
-            sampled_notes(f, "", &x, &y, &mut t.notes);
-        }
-        match (report(a), report(b)) {
-            (Some(x), Some(y)) => x == y,
+        match (serde_json::from_slice(a), serde_json::from_slice(b)) {
+            (Ok(mut x), Ok(mut y)) => {
+                sampled_notes(f, "", &x, &y, &mut t.notes);
+                let close = close_scores(f, &x, &y, &mut t.diffs, &mut t.notes);
+                strip(&mut x);
+                strip(&mut y);
+                close && x == y
+            }
             _ => a == b,
         }
     } else if f.ends_with(".svg") || f.ends_with(".gz") || f.ends_with(".html") || f.ends_with(".cast") {
@@ -188,6 +196,7 @@ fn pixels(png: &[u8]) -> Vec<u8> {
 }
 
 /// A JSON report with every timing field taken out.
+#[cfg(test)]
 fn report(b: &[u8]) -> Option<serde_json::Value> {
     let mut v: serde_json::Value = serde_json::from_slice(b).ok()?;
     strip(&mut v);
@@ -199,7 +208,9 @@ fn strip(v: &mut serde_json::Value) {
         serde_json::Value::Object(m) => {
             m.retain(|k, _| !TIMING_KEYS.contains(&k.as_str()) && !SAMPLED_KEYS.contains(&k.as_str()));
             match m.get("category").and_then(|c| c.as_str()) {
-                Some(c) if TIMED_SCORES.contains(&c) => m.retain(|k, _| k == "category" || k == "rule"),
+                Some(c) if TIMED_SCORES.contains(&c) || CLOSE_SCORES.iter().any(|(n, _)| *n == c) => {
+                    m.retain(|k, _| k == "category" || k == "rule")
+                }
                 Some(c) if QUOTING_SCORES.contains(&c) => {
                     m.remove("explain");
                 }
@@ -210,6 +221,39 @@ fn strip(v: &mut serde_json::Value) {
         serde_json::Value::Array(a) => a.iter_mut().for_each(strip),
         _ => {}
     }
+}
+
+/// The scores in `CLOSE_SCORES`, compared within their margin. A gap past
+/// it goes to `diffs`, a smaller one to `notes`; false when any went past.
+fn close_scores(
+    file: &str,
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    diffs: &mut Vec<String>,
+    notes: &mut Vec<String>,
+) -> bool {
+    let score = |v: &serde_json::Value, cat: &str| {
+        v["scores"].as_array()?.iter().find(|s| s["category"] == cat).map(|s| s["score"].as_i64())
+    };
+    let mut close = true;
+    for (cat, margin) in CLOSE_SCORES {
+        let (Some(x), Some(y)) = (score(a, cat), score(b, cat)) else { continue };
+        if x == y {
+            continue;
+        }
+        let shown = |s: Option<i64>| s.map_or("none".to_string(), |n| n.to_string());
+        let line = format!("{file} {cat}: {} vs {}", shown(x), shown(y));
+        match (x, y) {
+            (Some(x), Some(y)) if (x - y).abs() <= margin => {
+                notes.push(format!("{line} (within {margin}, not judged)"))
+            }
+            _ => {
+                diffs.push(format!("differs: {line}"));
+                close = false;
+            }
+        }
+    }
+    close
 }
 
 /// A line per sampled measure that differs between `a` and `b` (same
@@ -320,6 +364,33 @@ mod tests {
         let g2 = br#"{"states":[{"id":0,"title":"Main","volatile_cells":9}],"edges":[{"from":0,"to":1,"key":"j","latency_ms":51}]}"#;
         assert_eq!(report(g1), report(g2));
         assert!(sampled_png("terminals/60x20-truecolor/screen.png") && !sampled_png("shell/01-start.png"));
+    }
+
+    #[test]
+    fn a_theme_that_drops_readability_or_colors_is_a_difference() {
+        // review of #97, 2: the sampled counts are noise, the verdicts are not
+        let rep = |read: i64, nocolor: bool, c16: bool| {
+            format!(
+                r#"{{"scores":[{{"category":"readability","score":{read},"rule":"r","explain":["x"]}},{{"category":"compatibility","score":75,"rule":"c","explain":["y"]}}],"variants":[{{"variant":{{"name":"120x40-nocolor"}},"colors_respected":{nocolor},"colored_cells":3}},{{"variant":{{"name":"120x40-16"}},"colors_respected":{c16},"beyond16_cells":0}}]}}"#
+            )
+        };
+        let run = |a: &str, b: &str| {
+            let mut t = Tally::default();
+            compare("report.json", a.as_bytes(), b.as_bytes(), &mut t);
+            t
+        };
+        let t = run(&rep(95, true, false), &rep(30, true, false));
+        assert!(t.diffs.contains(&"differs: report.json readability: 95 vs 30".to_string()), "{:?}", t.diffs);
+        let t = run(&rep(93, true, false), &rep(94, true, false));
+        assert!(t.diffs.is_empty(), "{:?}", t.diffs);
+        assert!(
+            t.notes.contains(&"report.json readability: 93 vs 94 (within 5, not judged)".to_string()),
+            "{:?}",
+            t.notes
+        );
+        // the same 3 of 4, failed in another terminal
+        let t = run(&rep(90, false, true), &rep(90, true, false));
+        assert_eq!(t.diffs, ["differs: report.json"]);
     }
 
     #[test]

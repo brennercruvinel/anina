@@ -73,6 +73,10 @@ pub struct Outcome {
     /// Cells using a color past the first 16.
     pub beyond16_cells: usize,
     pub visible_cells: usize,
+    /// Whether the program kept to the colors this terminal can show, as
+    /// `color_respected` judges it (None: nothing to check). Kept apart from
+    /// the counts it comes from: they move with sampling, the verdict doesn't.
+    pub colors_respected: Option<bool>,
     pub says_too_small: bool,
     pub used_rows: u16,
     pub used_cols: u16,
@@ -318,7 +322,7 @@ pub fn outcome(variant: &Variant, rec: anyhow::Result<Recording>, dir: &Path) ->
         }
     }
     let shot = screens.iter().max_by_key(|s| visible(s)).cloned();
-    Outcome {
+    let mut o = Outcome {
         variant: variant.clone(),
         status,
         exit_code,
@@ -346,7 +350,10 @@ pub fn outcome(variant: &Variant, rec: anyhow::Result<Recording>, dir: &Path) ->
         hygiene: hygiene(exit_code, modes.as_ref()),
         shot,
         shot_png: None,
-    }
+        colors_respected: None,
+    };
+    o.colors_respected = o.color_respected().map(|(ok, _)| ok);
+    o
 }
 
 impl Outcome {
