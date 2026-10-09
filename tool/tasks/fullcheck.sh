@@ -16,5 +16,17 @@ cargo deny check
 # same version. under a path used before, emptying the dir is not enough: the
 # check builds against what the earlier run packaged.
 # the last run's dir goes first; this one stays until the next run.
+# those unpacked copies are never read again: on the way out, worked or
+# failed, every such folder that holds anina crates only goes (this run's and
+# any an earlier run left), and other projects' are left alone.
+unpacked="${CARGO_HOME:-$HOME/.cargo}/registry/src"
+forget_packages() {
+  for d in "$unpacked"/-*/; do
+    [ -d "$d" ] || continue
+    ls "$d" | grep -qv '^anina-' && continue
+    rm -rf "$d"
+  done
+}
+trap forget_packages EXIT
 rm -rf target/fullcheck-package
 CARGO_TARGET_DIR="target/fullcheck-package/$(date +%s)" cargo package --workspace --locked --allow-dirty
