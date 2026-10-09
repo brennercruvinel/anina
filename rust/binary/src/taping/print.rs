@@ -594,9 +594,10 @@ fn reaction(typed: &str, before: &Screen, after: &Screen, volatile: &Mask, seen:
     out
 }
 
-/// The rows the echo of `typed` may be on. With the cursor shown: from the
-/// row typing started on to the row it ended on, counting the rows the text
-/// wrapped over. With it hidden: rows that end with the typed text, the way
+/// The rows the echo of `typed` may be on. With the cursor shown: the row
+/// typing ended on and the rows the text wrapped over above it. Where the
+/// cursor was before says nothing: a key that opened a field moved it there
+/// (`/` in less takes it from the top to the last row). With it hidden: rows that end with the typed text, the way
 /// an input field does (`Find: install`); a row merely holding it says
 /// nothing (typing `e` would hide every row with an e).
 fn echo_rows(typed: &str, before: &Screen, after: &Screen) -> Vec<u16> {
@@ -604,9 +605,8 @@ fn echo_rows(typed: &str, before: &Screen, after: &Screen) -> Vec<u16> {
     if before.cursor.visible && after.cursor.visible {
         let len = typed.chars().count() as u16;
         let up = len.saturating_sub(after.cursor.x).div_ceil(after.cols.max(1));
-        let lo = before.cursor.y.min(after.cursor.y.saturating_sub(up));
-        let hi = before.cursor.y.max(after.cursor.y).min(last);
-        return (lo..=hi).collect();
+        let hi = after.cursor.y.min(last);
+        return (hi.saturating_sub(up)..=hi).collect();
     }
     let text = typed.trim_start_matches(|c: char| !c.is_alphanumeric()).trim_end();
     if text.is_empty() {
@@ -814,6 +814,16 @@ mod tests {
         let a = mk(&[pad("  readme.md", "markdown notes"), pad("  src/main.rs", ""), "> ".into()]);
         let b = mk(&[pad("  readme.md", ""), pad("  src/main.rs", "now matching"), "> src".into()]);
         assert_eq!(sync(&a, &b, Some(&Out::Type("src".into()))), ["Idle 3"]);
+    }
+
+    #[test]
+    fn a_cursor_that_jumps_does_not_make_the_screen_its_echo() {
+        // review of #70, 6: in less, `/` takes the cursor from the top to the last row
+        let mut a = anina_screen::escape::parse("alpha\r\nbeta install\r\ngamma\r\n\r\n:\x1b[1;1H", 60, 5);
+        a.cursor.visible = true;
+        let b = screen(&["alpha", "beta install", "gamma", "pattern found", "/install"]);
+        assert_eq!(a.cursor.y, 0);
+        assert_eq!(sync(&a, &b, Some(&Out::Type("/install".into()))), ["Wait /install", "Wait 'pattern found'"]);
     }
 
     #[test]
