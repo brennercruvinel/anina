@@ -528,6 +528,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
+    anina_runner::redact::writes_to(&out);
     let started = Instant::now();
     let stage = Stage::new(
         dir,

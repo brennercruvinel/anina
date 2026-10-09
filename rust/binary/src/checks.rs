@@ -44,13 +44,18 @@ pub fn mark_start() {
     let _ = STARTED.set(SystemTime::now());
 }
 
-/// Check what a command just wrote, before it reports success: the files
-/// under `out` written since `mark_start`, not a note the user keeps there
-/// or what an earlier run left (`anina check` reads those).
-pub fn verify(out: &Path) -> Result<()> {
+/// Check what a command just wrote, worked or failed: the files under the
+/// folders it noted (`redact::writes_to`) written since `mark_start`, not a
+/// note the user keeps there or what an earlier run left (`anina check`
+/// reads those).
+pub fn verify_written() -> Result<()> {
+    let outs: Vec<PathBuf> = anina_runner::redact::outputs().into_iter().filter(|d| d.exists()).collect();
+    if outs.is_empty() {
+        return Ok(());
+    }
     // a little before the start: some file systems keep whole seconds
     let since = STARTED.get().map(|t| *t - Duration::from_secs(2));
-    check_since(&[out.to_path_buf()], since)
+    check_since(&outs, since)
 }
 
 fn check(paths: &[PathBuf]) -> Result<()> {

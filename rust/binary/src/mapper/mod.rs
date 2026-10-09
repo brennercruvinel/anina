@@ -856,6 +856,7 @@ pub fn run(a: Args) -> Result<()> {
     let base =
         std::path::Path::new(&program).file_name().map_or("program".into(), |s| s.to_string_lossy().into_owned());
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("explore-{base}")));
+    anina_runner::redact::writes_to(&out);
     let mode: Mode = a.sandbox.parse()?;
     // like `anina run`: in the cache, emptied for every exploration
     let sb = match mode {
@@ -957,5 +958,5 @@ pub fn run(a: Args) -> Result<()> {
         std::fs::write(&p, tape)?;
         eprintln!("anina explore: s{target} shows {want:?}; the way there -> {}", anina_screen::lesson::shown(&p));
     }
-    crate::checks::verify(&out)
+    Ok(())
 }

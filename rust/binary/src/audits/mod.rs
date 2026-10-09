@@ -85,6 +85,7 @@ pub fn run(a: Args) -> Result<()> {
     };
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("audit-{name}")));
     std::fs::create_dir_all(&out)?;
+    anina_runner::redact::writes_to(&out);
 
     let tape = match &a.tape {
         Some(path) => {
@@ -104,8 +105,7 @@ pub fn run(a: Args) -> Result<()> {
             tape
         }
     };
-    audit(&a, &tape, &target, &out, None)?;
-    crate::checks::verify(&out)
+    audit(&a, &tape, &target, &out, None)
 }
 
 /// Audit every part of a preset (or `--part`), one report per part.
@@ -117,6 +117,7 @@ fn run_preset(a: &Args, preset: &str) -> Result<()> {
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("audit-{name}")));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
+    anina_runner::redact::writes_to(&out);
     let slot = format!("audit-{name}");
     let stage = Stage::new(
         dir,
@@ -143,7 +144,7 @@ fn run_preset(a: &Args, preset: &str) -> Result<()> {
         eprintln!("anina [{name}] auditing part {} · {}", part.name, Stage::title(part));
         audit(a, &tape, &format!("{name} · {}", part.name), &pout, Some(&stage))?;
     }
-    crate::checks::verify(&out)
+    Ok(())
 }
 
 /// Play `tape` in every terminal of the matrix, score it, write the report.

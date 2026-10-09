@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use regex::{Captures, Regex};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use unicode_width::UnicodeWidthChar;
 
@@ -58,6 +58,25 @@ static STANDARD: OnceLock<Redactor> = OnceLock::new();
 
 /// What was hidden this run, by label: hashes of the distinct texts.
 static SEEN: LazyLock<Mutex<BTreeMap<&'static str, HashSet<u64>>>> = LazyLock::new(Default::default);
+
+/// The folders this command writes to. When it ends, worked or failed,
+/// `anina` checks what was written there: a failed wait leaves its screen
+/// in `failed.txt` too.
+static OUTPUTS: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Default::default);
+
+/// Note `dir` as a folder this command writes to, once it exists.
+pub fn writes_to(dir: &Path) {
+    if let Ok(mut v) = OUTPUTS.lock()
+        && !v.iter().any(|d| d == dir)
+    {
+        v.push(dir.to_path_buf());
+    }
+}
+
+/// The folders noted by `writes_to`, in order.
+pub fn outputs() -> Vec<PathBuf> {
+    OUTPUTS.lock().map(|v| v.clone()).unwrap_or_default()
+}
 
 /// Load the config files and this machine's identity once, so every
 /// `Redactor::defaults()` after it has them. A broken config is an error here,
