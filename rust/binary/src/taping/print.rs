@@ -272,7 +272,8 @@ fn looks_like_id(w: &str) -> bool {
 const MAX_WAIT: usize = 24;
 
 /// Text that ends past this column at the recording size is cut off in the
-/// narrowest terminal `anina audit` tries (60 columns, less a border).
+/// narrowest terminal `anina audit` tries (60 columns, less a border): no
+/// `Wait` or `Gone` is written for it.
 const NARROW_COLS: u16 = 56;
 
 /// Text keys closer than this are typing, whatever a completion popup does
@@ -353,7 +354,11 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) 
                 if alnum < 3 || text.contains('\'') && text.contains('"') {
                     continue;
                 }
-                if seg.cols[a..b].iter().any(|x| volatile.get(*x, seg.y)) || at_edge(after, seg.y, &seg.cols[a..b]) {
+                // cut off in the narrowest terminal: never there, or there from the start
+                if seg.cols[b - 1] >= NARROW_COLS
+                    || seg.cols[a..b].iter().any(|x| volatile.get(*x, seg.y))
+                    || at_edge(after, seg.y, &seg.cols[a..b])
+                {
                     continue;
                 }
                 // what the replay's wait would see: never on before, once on after
@@ -373,9 +378,6 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) 
                 if !digits && !seen.contains(&text) {
                     score += NEW_TO_SESSION;
                 }
-                if seg.cols[b - 1] >= NARROW_COLS {
-                    score -= NEW_TO_SESSION / 2;
-                }
                 consider(score, quote(&text));
             }
         }
@@ -385,7 +387,9 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) 
         let stable = (0..after.cols).all(|x| !volatile.get(x, y) || after.cell(x, y).is_blank());
         let padded = row.trim().contains("  ") || row.trim().chars().count() > MAX_WAIT;
         let wrapped = after.row_full(y) || y > 0 && after.row_full(y - 1);
-        if row_new && alnum >= 2 && unique_line && stable && !padded && !wrapped && row.chars().count() <= 80 {
+        // a row that only lost its right part (a column a narrow terminal never shows) is not new
+        let narrow = row.chars().count() <= NARROW_COLS as usize && !before.shows(row.trim());
+        if row_new && alnum >= 2 && unique_line && stable && !padded && !wrapped && narrow {
             let digits = row.chars().any(|c| c.is_ascii_digit());
             let mut score = alnum.min(40) as i64 - 2 + if digits { -20 } else { 8 };
             if !digits && !seen.lines().any(|l| l == row) {
@@ -622,7 +626,12 @@ fn vanished(before: &Screen, after: &Screen, mask: &Mask) -> Option<String> {
         for seg in segments(before, y) {
             let chars: Vec<char> = seg.text.chars().collect();
             let (a, b) = trim_span(&chars);
-            if b <= a || seg.cols[a..b].iter().any(|x| mask.get(*x, y)) || at_edge(before, y, &seg.cols[a..b]) {
+            // past the narrow edge it may never be on screen, and a Gone of it passes at once
+            if b <= a
+                || seg.cols[b - 1] >= NARROW_COLS
+                || seg.cols[a..b].iter().any(|x| mask.get(*x, y))
+                || at_edge(before, y, &seg.cols[a..b])
+            {
                 continue;
             }
             let text: String = chars[a..b].iter().collect();
@@ -791,6 +800,20 @@ mod tests {
         assert!(c.iter().all(|(_, w)| !w.contains("comp") && !w.contains("lete")), "{c:?}");
         // text the replay still finds across the edge is not gone
         assert!(vanished(&mk("complete\r\n$ "), &b, &Mask::new(60, 4)).is_none());
+    }
+
+    #[test]
+    fn nothing_past_the_narrow_edge_is_waited_on() {
+        // review of #70, 5: at 60 columns a TUI cuts what ends past column 56
+        let pad = |l: &str, r: &str| format!("{l:<64}{r}");
+        let mk = |rows: &[String]| {
+            let mut s = anina_screen::escape::parse(&rows.join("\r\n"), 120, rows.len() as u16);
+            s.cursor.visible = true;
+            s
+        };
+        let a = mk(&[pad("  readme.md", "markdown notes"), pad("  src/main.rs", ""), "> ".into()]);
+        let b = mk(&[pad("  readme.md", ""), pad("  src/main.rs", "now matching"), "> src".into()]);
+        assert_eq!(sync(&a, &b, Some(&Out::Type("src".into()))), ["Idle 3"]);
     }
 
     #[test]
