@@ -5,6 +5,7 @@
 //! text chunks anina writes into it (the screen it shows); a PNG without
 //! text is only pixels, and the summary counts it apart.
 
+use anina_render::pixel::{PNG_SIGNATURE, png_text};
 use anina_runner::redact::Redactor;
 use anyhow::{Result, bail};
 use regex::Regex;
@@ -192,68 +193,6 @@ fn read(p: &Path) -> Result<Content> {
         return Ok(Content::Binary);
     }
     Ok(String::from_utf8(bytes).map_or(Content::Binary, Content::Text))
-}
-
-pub const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
-
-/// A PNG's chunks as (kind, data), in order, up to IEND or the first one
-/// that runs past the end. Empty when `png` is not a PNG.
-pub fn png_chunks(png: &[u8]) -> Vec<(&[u8], &[u8])> {
-    let mut out = Vec::new();
-    if !png.starts_with(PNG_SIGNATURE) {
-        return out;
-    }
-    let mut at = PNG_SIGNATURE.len();
-    while at + 12 <= png.len() {
-        let len = u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]) as usize;
-        let kind = &png[at + 4..at + 8];
-        let Some(data) = png.get(at + 8..at + 8 + len) else { break };
-        out.push((kind, data));
-        if kind == b"IEND" {
-            break;
-        }
-        at += 12 + len;
-    }
-    out
-}
-
-/// The text of every tEXt, zTXt and iTXt chunk of a PNG, joined by lines.
-/// A chunk that does not parse is left out; the rest still counts.
-fn png_text(png: &[u8]) -> String {
-    let text: Vec<String> = png_chunks(png)
-        .into_iter()
-        .filter_map(|(kind, data)| match kind {
-            b"tEXt" => data.splitn(2, |b| *b == 0).nth(1).map(latin1),
-            b"zTXt" => {
-                data.splitn(2, |b| *b == 0).nth(1).and_then(|r| r.get(1..)).and_then(inflate).map(|b| latin1(&b))
-            }
-            b"iTXt" => itxt(data),
-            _ => None,
-        })
-        .collect();
-    text.join("\n")
-}
-
-/// keyword NUL flag method language NUL translated NUL text
-fn itxt(data: &[u8]) -> Option<String> {
-    let mut parts = data.splitn(2, |b| *b == 0);
-    parts.next()?;
-    let rest = parts.next()?;
-    let (flag, rest) = (*rest.first()?, rest.get(2..)?);
-    let mut fields = rest.splitn(3, |b| *b == 0);
-    let (_lang, _translated, text) = (fields.next()?, fields.next()?, fields.next()?);
-    let text = if flag == 1 { inflate(text)? } else { text.to_vec() };
-    String::from_utf8(text).ok()
-}
-
-fn inflate(z: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    flate2::read::ZlibDecoder::new(z).read_to_end(&mut out).ok()?;
-    Some(out)
-}
-
-fn latin1(b: &[u8]) -> String {
-    b.iter().map(|&c| c as char).collect()
 }
 
 #[cfg(test)]

@@ -176,7 +176,7 @@ fn untimed(b: &[u8]) -> String {
 
 /// A PNG without its text chunks: what it draws, not what it says.
 fn pixels(png: &[u8]) -> Vec<u8> {
-    let chunks = crate::checks::png_chunks(png);
+    let chunks = anina_render::pixel::png_chunks(png);
     if chunks.is_empty() {
         return png.to_vec();
     }
