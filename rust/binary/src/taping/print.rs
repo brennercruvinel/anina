@@ -303,6 +303,35 @@ fn at_edge(s: &Screen, y: u16, cols: &[u16]) -> bool {
     (*last + 1 >= s.cols && s.row_full(y)) || (*first == 0 && y > 0 && s.row_full(y - 1))
 }
 
+/// Every distinct line of the screens so far. A step's text is news only
+/// when no earlier line holds it (a wait never spans lines). Kept as lines,
+/// not screens: a session shows the same lines step after step, and each is
+/// kept once, so writing a tape doesn't grow with the square of its length.
+#[derive(Debug, Default)]
+pub struct Seen {
+    lines: std::collections::HashSet<String>,
+}
+
+impl Seen {
+    pub fn add(&mut self, s: &Screen) {
+        for l in s.text().lines().filter(|l| !l.trim().is_empty()) {
+            if !self.lines.contains(l) {
+                self.lines.insert(l.to_string());
+            }
+        }
+    }
+
+    /// Whether an earlier line holds `text`.
+    fn holds(&self, text: &str) -> bool {
+        self.lines.iter().any(|l| l.contains(text))
+    }
+
+    /// Whether `row` was an earlier line, whole.
+    fn had_line(&self, row: &str) -> bool {
+        self.lines.contains(row)
+    }
+}
+
 /// The best text to wait for after a step: new since `before`, unique on
 /// `after`, made of cells that do not change by themselves, preferably free
 /// of digits (timings and counters change from run to run), and new to the
@@ -310,12 +339,12 @@ fn at_edge(s: &Screen, y: u16, cols: &[u16]) -> bool {
 /// only came back from under a popup says little about what this step did.
 /// Returns the tape argument (a literal, or a `/^row$/` regex for a whole new
 /// row).
-pub fn distinctive(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) -> Option<String> {
+pub fn distinctive(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen) -> Option<String> {
     candidates(before, after, volatile, seen).into_iter().next().filter(|c| c.0 > 0).map(|c| c.1)
 }
 
 /// Every text `distinctive` could pick, best first, with its score.
-pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) -> Vec<(i64, String)> {
+pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen) -> Vec<(i64, String)> {
     let after_text = after.text();
     let mut found: Vec<(i64, String)> = Vec::new();
     let mut consider = |score: i64, arg: String| found.push((score, arg));
@@ -386,7 +415,7 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) 
                     score += 4;
                 }
                 // digits are counters and clocks ("32 minutes ago"): new, but not news
-                if !digits && !seen.contains(&text) {
+                if !digits && !seen.holds(&text) {
                     score += NEW_TO_SESSION;
                 }
                 consider(score, quote(&text));
@@ -403,7 +432,7 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &str) 
         if row_new && alnum >= 2 && unique_line && stable && !padded && !wrapped && narrow {
             let digits = row.chars().any(|c| c.is_ascii_digit());
             let mut score = alnum.min(40) as i64 - 2 + if digits { -20 } else { 8 };
-            if !digits && !seen.lines().any(|l| l == row) {
+            if !digits && !seen.had_line(&row) {
                 score += NEW_TO_SESSION;
             }
             consider(score, quote(&format!("/^{}$/", regex::escape(&row))));
@@ -440,9 +469,10 @@ pub fn write(s: &Session) -> String {
     let first_t = steps.first().map_or(s.end, |st| st.1);
     let first_screen = steps.first().map_or(&s.last, |st| before_of(st.2));
     let first_quiet = steps.first().map_or(&s.last_quiet, |st| &s.inputs[st.2].quiet);
-    push_sync(&mut lines, &blank, first_screen, &union(&s.volatile, first_quiet), first_t, "", None);
+    push_sync(&mut lines, &blank, first_screen, &union(&s.volatile, first_quiet), first_t, &Seen::default(), None);
     // every screen so far, to tell new text from text that came back
-    let mut seen = first_screen.text();
+    let mut seen = Seen::default();
+    seen.add(first_screen);
 
     let mut resizes = s.resizes.iter().peekable();
     let mut out: Vec<String> = Vec::new();
@@ -465,8 +495,7 @@ pub fn write(s: &Session) -> String {
             break; // the program closed its screen: nothing to wait for
         }
         push_sync(&mut out, before_of(*idx), after, &union(&s.volatile, quiet), gap, &seen, Some(step));
-        seen.push('\n');
-        seen.push_str(&after.text());
+        seen.add(after);
     }
     lines.extend(merge_keys(out));
     let mut text = lines.join("\n");
@@ -489,7 +518,7 @@ fn push_sync(
     after: &Screen,
     volatile: &Mask,
     gap: f64,
-    seen: &str,
+    seen: &Seen,
     step: Option<&Out>,
 ) {
     if before.cells != after.cells {
@@ -529,7 +558,7 @@ const SMALL: (u16, u16) = (60, 20);
 /// cursor: what shows far from it depends on the terminal's height, while
 /// the rows next to the cursor (a shell's last output, an editor's new line)
 /// show in every size.
-fn appeared(before: &Screen, after: &Screen, mask: &Mask, seen: &str) -> Option<String> {
+fn appeared(before: &Screen, after: &Screen, mask: &Mask, seen: &Seen) -> Option<String> {
     let w = if scrolled(before, after) {
         let far = far_from_cursor(after)?;
         distinctive(before, after, &union(mask, &far), seen)
@@ -581,7 +610,7 @@ fn far_from_cursor(s: &Screen) -> Option<Mask> {
 /// echo's rows changed. When the screen scrolled, the rows that left at the
 /// top left with the scroll (a long line wrapped on the last row), and in a
 /// taller terminal they stay: only new text counts then.
-fn reaction(typed: &str, before: &Screen, after: &Screen, volatile: &Mask, seen: &str) -> Vec<String> {
+fn reaction(typed: &str, before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen) -> Vec<String> {
     if before.cols != after.cols || before.rows != after.rows {
         return Vec::new();
     }
@@ -755,7 +784,7 @@ mod tests {
 
     fn sync(before: &Screen, after: &Screen, step: Option<&Out>) -> Vec<String> {
         let mut out = Vec::new();
-        push_sync(&mut out, before, after, &Mask::new(before.cols, before.rows), 1.0, "", step);
+        push_sync(&mut out, before, after, &Mask::new(before.cols, before.rows), 1.0, &Seen::default(), step);
         out
     }
 
@@ -807,7 +836,7 @@ mod tests {
         let head = format!("{} comp", "x".repeat(55));
         let (a, b) = (mk("$ "), mk(&format!("{head}\r\nlete\r\n$ ")));
         assert!(b.row_full(0));
-        let c = candidates(&a, &b, &Mask::new(60, 4), "");
+        let c = candidates(&a, &b, &Mask::new(60, 4), &Seen::default());
         assert!(c.iter().all(|(_, w)| !w.contains("comp") && !w.contains("lete")), "{c:?}");
         // text the replay still finds across the edge is not gone
         assert!(vanished(&mk("complete\r\n$ "), &b, &Mask::new(60, 4)).is_none());
@@ -882,6 +911,21 @@ mod tests {
     }
 
     #[test]
+    fn seen_keeps_each_line_once() {
+        // review of #70, 10: the same screens over a long session
+        let a = screen(&["  readme.md", "  src/main.rs", "> "]);
+        let b = screen(&["  readme.md", "  1 match", "> src"]);
+        let mut seen = Seen::default();
+        for _ in 0..1000 {
+            seen.add(&a);
+            seen.add(&b);
+        }
+        assert_eq!(seen.lines.len(), 5);
+        assert!(seen.holds("main.rs") && seen.holds("1 match") && !seen.holds("readme.md  "));
+        assert!(seen.had_line("  src/main.rs") && !seen.had_line("src/main.rs"));
+    }
+
+    #[test]
     fn a_one_letter_filter_still_waits_for_the_filter() {
         // review of #58, 7: typing `e` in fzf hid every row holding an e
         let a = screen(&["  readme.md", "  src/main.rs", "  test.rs", "  3/3", "> "]);
@@ -950,7 +994,7 @@ mod tests {
     fn a_padded_row_is_not_a_whole_row_wait() {
         let a = screen(&["", "", ""]);
         let b = screen(&["close      write      quit", "", ""]);
-        let c = candidates(&a, &b, &Mask::new(60, 3), "");
+        let c = candidates(&a, &b, &Mask::new(60, 3), &Seen::default());
         assert!(c.iter().all(|(_, w)| !w.starts_with("'/^")), "{c:?}");
     }
 }
