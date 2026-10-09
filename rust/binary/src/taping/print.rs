@@ -295,6 +295,19 @@ const TYPING_GAP: f64 = 0.25;
 /// what a step brings up beats what a closing popup uncovers.
 const NEW_TO_SESSION: i64 = 100;
 
+/// The column after the last one row `y` fills, in columns: a wide
+/// character takes two (`row_text` gives it one char).
+fn row_end(s: &Screen, y: u16) -> u16 {
+    s.row(y).iter().rposition(|c| c.is_spacer() || c.ch != " ").map_or(0, |x| x as u16 + 1)
+}
+
+/// Row `y` as the narrowest terminal cuts it: its cells before `NARROW_COLS`.
+fn row_cut(s: &Screen, y: u16) -> String {
+    let cells = &s.row(y)[..NARROW_COLS.min(s.cols) as usize];
+    let text: String = cells.iter().filter(|c| !c.is_spacer()).map(|c| c.ch.as_str()).collect();
+    text.trim_end().to_string()
+}
+
 /// Does text in these columns of row `y` touch an edge the terminal wrapped
 /// at? Then a narrower or wider terminal cuts it elsewhere (`comp` at the end
 /// of a full row, `lete` starting the next).
@@ -349,10 +362,7 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen)
     let after_text = after.text();
     let before_lines: std::collections::HashSet<String> = (0..before.rows).map(|y| before.row_text(y)).collect();
     // before's rows as the narrowest terminal cuts them
-    let before_cut: std::collections::HashSet<String> = before_lines
-        .iter()
-        .map(|l| l.chars().take(NARROW_COLS as usize).collect::<String>().trim_end().to_string())
-        .collect();
+    let before_cut: std::collections::HashSet<String> = (0..before.rows).map(|y| row_cut(before, y)).collect();
     let mut found: Vec<(i64, String)> = Vec::new();
     let mut consider = |score: i64, arg: String| found.push((score, arg));
     for y in 0..after.rows {
@@ -436,7 +446,7 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen)
         let wrapped = after.row_full(y) || y > 0 && after.row_full(y - 1);
         // a row that only lost its right part (a column a narrow terminal never
         // shows) is already there, whole, in that terminal
-        let narrow = row.chars().count() <= NARROW_COLS as usize && !before_cut.contains(&row);
+        let narrow = row_end(after, y) <= NARROW_COLS && !before_cut.contains(&row);
         if row_new && alnum >= 2 && unique_line && stable && !padded && !wrapped && narrow {
             let digits = row.chars().any(|c| c.is_ascii_digit());
             let mut score = alnum.min(40) as i64 - 2 + if digits { -20 } else { 8 };
@@ -938,6 +948,24 @@ mod tests {
         assert_eq!(seen.lines.len(), 5);
         assert!(seen.holds("main.rs") && seen.holds("1 match") && !seen.holds("readme.md  "));
         assert!(seen.had_line("  src/main.rs") && !seen.had_line("src/main.rs"));
+    }
+
+    #[test]
+    fn a_whole_row_is_measured_in_columns() {
+        // review of #97, 3: a wide character takes two columns
+        let mk = |rows: &[&str]| {
+            let mut s = anina_screen::escape::parse(&rows.join("\r\n"), 120, rows.len() as u16);
+            s.cursor.visible = true;
+            s
+        };
+        // a whole-row wait holds 24 characters at most, so a long row is never
+        // one; an indented short one is: 51 chars over 57 columns, 48 over 58
+        let emoji = format!("{}done 🚀🚀🚀🚀🚀🚀", " ".repeat(40));
+        let cjk = format!("{}日本語のテキスト終わり", " ".repeat(38));
+        for row in [emoji.as_str(), cjk.as_str()] {
+            let w = sync(&mk(&["$ run", "", "$ "]), &mk(&["$ run", row, "$ "]), Some(&Out::Key("enter".into(), 1)));
+            assert!(w.iter().all(|l| !l.contains("/^")), "{row}: {w:?}");
+        }
     }
 
     #[test]
