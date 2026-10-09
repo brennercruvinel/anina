@@ -345,12 +345,19 @@ pub fn distinctive(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen
 
 /// Every text `distinctive` could pick, best first, with its score.
 pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen) -> Vec<(i64, String)> {
+    let (shown_before, shown_after) = (before.views(), after.views());
     let after_text = after.text();
+    let before_lines: std::collections::HashSet<String> = (0..before.rows).map(|y| before.row_text(y)).collect();
+    // before's rows as the narrowest terminal cuts them
+    let before_cut: std::collections::HashSet<String> = before_lines
+        .iter()
+        .map(|l| l.chars().take(NARROW_COLS as usize).collect::<String>().trim_end().to_string())
+        .collect();
     let mut found: Vec<(i64, String)> = Vec::new();
     let mut consider = |score: i64, arg: String| found.push((score, arg));
     for y in 0..after.rows {
         let row = after.row_text(y);
-        let row_new = !before.text().lines().any(|l| l == row);
+        let row_new = !before_lines.contains(&row);
         for seg in segments(after, y) {
             let chars: Vec<char> = seg.text.chars().collect();
             // the whole segment and its digit-free word runs
@@ -402,7 +409,7 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen)
                     continue;
                 }
                 // what the replay's wait would see: never on before, once on after
-                if before.shows(&text) || after.count_shown(&text) != 1 {
+                if shown_before.shows(&text) || shown_after.count(&text) != 1 {
                     continue;
                 }
                 let digits = text.chars().any(|c| c.is_ascii_digit());
@@ -427,8 +434,9 @@ pub fn candidates(before: &Screen, after: &Screen, volatile: &Mask, seen: &Seen)
         let stable = (0..after.cols).all(|x| !volatile.get(x, y) || after.cell(x, y).is_blank());
         let padded = row.trim().contains("  ") || row.trim().chars().count() > MAX_WAIT;
         let wrapped = after.row_full(y) || y > 0 && after.row_full(y - 1);
-        // a row that only lost its right part (a column a narrow terminal never shows) is not new
-        let narrow = row.chars().count() <= NARROW_COLS as usize && !before.shows(row.trim());
+        // a row that only lost its right part (a column a narrow terminal never
+        // shows) is already there, whole, in that terminal
+        let narrow = row.chars().count() <= NARROW_COLS as usize && !before_cut.contains(&row);
         if row_new && alnum >= 2 && unique_line && stable && !padded && !wrapped && narrow {
             let digits = row.chars().any(|c| c.is_ascii_digit());
             let mut score = alnum.min(40) as i64 - 2 + if digits { -20 } else { 8 };
@@ -660,6 +668,7 @@ fn echo_rows(typed: &str, before: &Screen, after: &Screen) -> Vec<u16> {
 /// edge, from the row nearest the cursor (rows far from it may not be on a
 /// smaller screen to begin with).
 fn vanished(before: &Screen, after: &Screen, mask: &Mask) -> Option<String> {
+    let (shown_before, shown_after) = (before.views(), after.views());
     let cy = after.cursor.y;
     let mut best: Option<(u16, String)> = None;
     for y in 0..before.rows {
@@ -679,8 +688,8 @@ fn vanished(before: &Screen, after: &Screen, mask: &Mask) -> Option<String> {
                 && text.chars().count() <= MAX_WAIT
                 && !text.chars().any(|c| c.is_ascii_digit())
                 && !(text.contains('\'') && text.contains('"'))
-                && before.count_shown(&text) == 1
-                && !after.shows(&text);
+                && shown_before.count(&text) == 1
+                && !shown_after.shows(&text);
             let dist = y.abs_diff(cy);
             if ok && best.as_ref().is_none_or(|(d, _)| dist < *d) {
                 best = Some((dist, text));
@@ -694,6 +703,7 @@ fn vanished(before: &Screen, after: &Screen, mask: &Mask) -> Option<String> {
 /// and not on `before`: the text next to the cursor, on screen at any width.
 /// Leading signs may be keys that opened the field (`/` to filter, `:`).
 fn typed_tail(typed: &str, before: &Screen, after: &Screen) -> Option<String> {
+    let (shown_before, shown_after) = (before.views(), after.views());
     let first_word = typed.find(char::is_alphanumeric).into_iter();
     let mut starts: Vec<usize> = std::iter::once(0).chain(first_word).collect();
     starts.extend(typed.match_indices(' ').map(|(i, _)| i + 1));
@@ -707,8 +717,8 @@ fn typed_tail(typed: &str, before: &Screen, after: &Screen) -> Option<String> {
         .find(|t| {
             t.chars().filter(|c| c.is_alphanumeric()).count() >= 6
                 && t.chars().count() <= MAX_WAIT
-                && after.count_shown(t) == 1
-                && !before.shows(t)
+                && shown_after.count(t) == 1
+                && !shown_before.shows(t)
         })
         .map(String::from)
 }
@@ -854,6 +864,11 @@ mod tests {
         let a = mk(&[pad("  readme.md", "markdown notes"), pad("  src/main.rs", ""), "> ".into()]);
         let b = mk(&[pad("  readme.md", ""), pad("  src/main.rs", "now matching"), "> src".into()]);
         assert_eq!(sync(&a, &b, Some(&Out::Type("src".into()))), ["Idle 3"]);
+        // a whole new row is new even when a longer row held its text
+        let a = screen(&["$ echo next"]);
+        let b = screen(&["$ echo next", "next", "$ "]);
+        let a = anina_screen::escape::parse(&format!("{}\r\n\r\n", a.row_text(0)), 60, 3);
+        assert_eq!(sync(&a, &b, Some(&Out::Key("enter".into(), 1))), ["Wait '/^next$/'"]);
     }
 
     #[test]
