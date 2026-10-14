@@ -1,5 +1,5 @@
 name = "urna"
-description = "urna, the single-file vector database: urna setup on an empty machine, then the urna tui explorer"
+description = "urna, the single-file vector database: urna setup on an empty machine, the urna tui explorer, build and ask from a checkout, and the install through each package channel"
 homepage = "https://urna.dev"
 sandbox = "env"
 theme = "theme.json"
@@ -33,6 +33,11 @@ about = "an urna checkout; the tui part builds its starter corpus from it"
 name = "URNA_CORPUS_DIR"
 default = "${WORK}"
 about = "a folder with quickstart.urna for the tui part (built from URNA_REPO when missing)"
+
+[[vars]]
+name = "URNA_INSTALLS"
+default = ""
+about = "1 records the installs through Homebrew, npm, cargo binstall and uv; Homebrew writes to its own prefix, so that part removes what it installed"
 
 [[prepare]]
 about = "install the released urna binary"
@@ -68,6 +73,17 @@ cd "$URNA_REPO" && "$bin" build --spec demo/starter/corpus.toml --out-dir "$URNA
 creates = "${URNA_CORPUS_DIR}/quickstart.urna"
 needs = ["URNA_REPO"]
 
+[[prepare]]
+about = "trust, in the sandbox only, the taps this machine already has, so brew prints what a machine with no other tap prints"
+run = """
+command -v brew > /dev/null || exit 0
+for t in $(brew tap); do
+  [ "$t" = hoffresearch/urna ] || HOME="$HOME_DIR" XDG_CONFIG_HOME="$HOME_DIR/.config" brew trust "$t" > /dev/null
+done
+"""
+creates = "${HOME_DIR}/.config/homebrew/trust.json"
+needs = ["URNA_INSTALLS"]
+
 [[parts]]
 name = "setup"
 tape = "setup.tape"
@@ -85,3 +101,45 @@ name = "tui"
 tape = "tui.tape"
 title = "urna tui: open a corpus, ask it, read the cited answer"
 about = "home, open, ask, the hits with their citations, health, quit"
+
+[[parts]]
+name = "build"
+tape = "build.tape"
+title = "urna build: twelve paragraphs in, one .urna out"
+about = "the starter corpus built from a checkout, then validated"
+needs = ["URNA_REPO"]
+
+[[parts]]
+name = "ask"
+tape = "ask.tape"
+title = "urna ask: the answer and its citation"
+about = "a question, the cited passage, and urna cite resolving the citation"
+needs = ["URNA_REPO"]
+
+[[parts]]
+name = "brew"
+tape = "brew.tape"
+title = "brew install hoffresearch/urna/urna"
+about = "the formula from the tap, on a HOME that never ran brew"
+needs = ["URNA_INSTALLS"]
+
+[[parts]]
+name = "npm"
+tape = "npm.tape"
+title = "npm install -g @urna/cli"
+about = "the npm package, which fetches the release binary on install"
+needs = ["URNA_INSTALLS"]
+
+[[parts]]
+name = "cargo"
+tape = "cargo.tape"
+title = "cargo binstall urna"
+about = "the crate from crates.io, the prebuilt binary from the release"
+needs = ["URNA_INSTALLS"]
+
+[[parts]]
+name = "pypi"
+tape = "pypi.tape"
+title = "uv tool install urna"
+about = "the wheel from PyPI and its read-only verbs"
+needs = ["URNA_INSTALLS", "URNA_REPO"]

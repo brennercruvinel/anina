@@ -10,6 +10,7 @@
 - `--embed` on `run` and `audit`: the images go inside `index.html` / `report.html`, one file to share.
 - Every PNG anina writes carries the text of the screen it shows, and `anina check` reads it. `run`, `record`, `audit` and `explore` end with that check on the files they wrote, whether they worked or failed (a failed wait leaves `failed.txt`), judged by ctime, so a copy that kept its mtime (`cp -p`, `rsync -a`, `tar x`, `mv`) is checked too. A note kept in the output folder, or what an earlier run left there, is for `anina check` to read.
 - A tape warns when a `Type` with several words ends in something that reads as a delay: it is typed as text; `Type@30ms` sets the delay.
+- The urna preset records `urna build` from a checkout, `urna ask` with its citation resolved by `urna cite`, and, with `URNA_INSTALLS=1`, the install through Homebrew, npm, `cargo binstall` and uv, each in the sandbox's HOME. Homebrew writes to its own prefix, so that part refuses to start while urna or its tap is there and removes both at the end, and it runs with the real `USER`: under the sandbox's `user` Homebrew stops at "user user doesn't exist". The tui part opens the file by name, since urna's home screen after 0.5.4 no longer lists the folder's files.
 
 ### Fixed
 
