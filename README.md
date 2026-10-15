@@ -8,11 +8,13 @@ create beautifuk animatios readmes for tui apps
 
 ## 425 KB `SVG` (no gif)
 truecolor and live animation, self-contained
-<p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
 
 works with ratatui and bunble tea
 
 the perfect tool for lazy devs
+
+<p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
+
 
 anina runs a program in a real terminal and reads its screen the way you do, cell by cell, colors and all. It never asks which framework drew the screen. ratatui, Textual, Bubble Tea and a plain `printf` all look the same to it.
 
