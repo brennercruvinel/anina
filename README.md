@@ -6,7 +6,7 @@ Run in safety portable &b safety VM sandbox
 
 create beautiful animatios readmes for tui apps 
 
-## 425 KB `SVG` (no gif)
+## 20s of truecolor live animation in 425 KB SVG (no GIF)
 truecolor and live animation, self-contained
 
 works with ratatui and bunble tea
