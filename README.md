@@ -1,10 +1,10 @@
-# anina is the best friend of terminal freak guys
+# anIna is the best friend of terminal freaks
 
 ** Audit, map, redact and record terminal **
 
-Run in safety portable VM to protect your pockets
+Run in safety portable &b safety VM sandbox 
 
-create beautifuk animatios readmes for tui apps 
+create beautiful animatios readmes for tui apps 
 
 ## 425 KB `SVG` (no gif)
 truecolor and live animation, self-contained
@@ -12,6 +12,9 @@ truecolor and live animation, self-contained
 works with ratatui and bunble tea
 
 the perfect tool for lazy devs
+
+# reject modernity embrace tradition
+### WE LOVE TUI
 
 <p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
 
