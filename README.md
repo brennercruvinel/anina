@@ -1,18 +1,28 @@
-# anina
+# anina is the best friend of terminal frek guys
 
-**Audit, map, redact and record any terminal app. No AI required.**
+** Audit, map, redact and record terminal **
+
+Run in safety portable VM to protect your pockets
+
+create beautifuk animatios readmes for tui apps 
+
+## 425 KB `SVG` (no gif)
+truecolor and live animation, self-contained
+<p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
+
+works with ratatui and bunble tea
+
+the perfect tool for lazy devs
 
 anina runs a program in a real terminal and reads its screen the way you do, cell by cell, colors and all. It never asks which framework drew the screen. ratatui, Textual, Bubble Tea and a plain `printf` all look the same to it.
 
-Think Lighthouse + Playwright + VHS, for terminal apps. The result is deterministic: the same input gives the same output.
-
-<p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
-
-<sub>Recorded by `anina run urna`: a ratatui app with braille art, truecolor and live animation, in a 425 KB self-contained SVG (48 KB gzipped).</sub>
+Explainig for a 13y kid: this is like Lighthouse + Playwright + VHS, for audit terminal apps local, in a locked native VMs
+and create beautifuk readmes for tui a
+<sub>Recorded by `anina run urna`: a ratatui app with braille art</sub>
 
 ## What it found so far
 
-urna writes truecolor even when the terminal never announced it. Its dimmest palette steps fall below WCAG contrast, with the key-hint footer at 3.6:1, and the home screen rewords itself at 80x24, which breaks any tape waiting on that text.
+urna example writes truecolor even when the terminal never announced it. Its dimmest palette steps fall below WCAG contrast, with the key-hint footer at 3.6:1, and the home screen rewords itself at 80x24, which breaks any tape waiting on that text.
 
 Killing a burn training run from its TUI exits with code 101, a deliberate `panic!`. And plain `ls -G` on macOS ignores `NO_COLOR`; its directory blue on black is 2.2:1.
 
