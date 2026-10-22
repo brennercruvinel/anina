@@ -1,18 +1,33 @@
-# anina
+# anIna is the best friend of terminal freaks
 
-**Audit, map, redact and record any terminal app. No AI required.**
+** Audit, map, redact and record terminal **
 
-anina runs a program in a real terminal and reads its screen the way you do, cell by cell, colors and all. It never asks which framework drew the screen. ratatui, Textual, Bubble Tea and a plain `printf` all look the same to it.
+Run in safety portable &b safety VM sandbox 
 
-Think Lighthouse + Playwright + VHS, for terminal apps. The result is deterministic: the same input gives the same output.
+create beautiful animatios readmes for tui apps 
+
+## 20s of truecolor live animation in 425 KB SVG (no GIF)
+truecolor and live animation, self-contained
+
+works with ratatui and bunble tea
+
+the perfect tool for lazy devs
+
+# reject modernity embrace tradition
+### WE LOVE TUI
 
 <p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
 
-<sub>Recorded by `anina run urna`: a ratatui app with braille art, truecolor and live animation, in a 425 KB self-contained SVG (48 KB gzipped).</sub>
+
+anina runs a program in a real terminal and reads its screen the way you do, cell by cell, colors and all. It never asks which framework drew the screen. ratatui, Textual, Bubble Tea and a plain `printf` all look the same to it.
+
+Explainig for a 13y kid: this is like Lighthouse + Playwright + VHS, for audit terminal apps local, in a locked native VMs
+and create beautifuk readmes for tui a
+<sub>Recorded by `anina run urna`: a ratatui app with braille art</sub>
 
 ## What it found so far
 
-urna writes truecolor even when the terminal never announced it. Its dimmest palette steps fall below WCAG contrast, with the key-hint footer at 3.6:1, and the home screen rewords itself at 80x24, which breaks any tape waiting on that text.
+urna example writes truecolor even when the terminal never announced it. Its dimmest palette steps fall below WCAG contrast, with the key-hint footer at 3.6:1, and the home screen rewords itself at 80x24, which breaks any tape waiting on that text.
 
 Killing a burn training run from its TUI exits with code 101, a deliberate `panic!`. And plain `ls -G` on macOS ignores `NO_COLOR`; its directory blue on black is 2.2:1.
 
