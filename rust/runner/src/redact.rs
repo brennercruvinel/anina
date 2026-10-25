@@ -335,6 +335,15 @@ impl Redactor {
                 let cells: Vec<Cell> = (y0..=y1).flat_map(|y| screen.row(y).to_vec()).collect();
                 let (text, at) = row_map(&cells);
                 let Some((start, end, with)) = rule.find(&text, &at, &cells) else { break };
+                // `continues` guesses: a row that fills the width and is followed by
+                // text looks wrapped. A match inside one row is spliced in that row,
+                // so the rows after it never move up into a line they are not part of.
+                let cols = screen.cols as usize;
+                if start / cols == (end - 1) / cols {
+                    let y = y0 + (start / cols) as u16;
+                    splice(screen, y, start % cols, start % cols + (end - start), &with);
+                    continue;
+                }
                 let spare = cells.iter().rev().take_while(|c| c.ch == " ").count();
                 let room = end - start + spare;
                 let mut seq = cells[..start].to_vec();
@@ -683,6 +692,22 @@ mod tests {
         let row = s.row_text(0);
         assert!(row.starts_with("~/notes"), "{row:?}");
         assert_eq!(row.find("|end"), Some(21), "{row:?}");
+    }
+
+    #[test]
+    fn a_row_that_fills_the_width_keeps_the_next_row_in_place() {
+        // 20 columns: the first row is full, the next is output that only looks like its tail
+        let mut s = anina_screen::escape::parse("ab /Users/alice/xyzw\r\nhello\r\n", 20, 3);
+        red().apply(&mut s);
+        assert_eq!(s.row_text(0).trim_end(), "ab ~/xyzw");
+        assert_eq!(s.row_text(1).trim_end(), "hello");
+    }
+
+    #[test]
+    fn a_path_cut_by_the_wrap_is_still_hidden() {
+        let mut s = anina_screen::escape::parse("cd /Users/ali\r\nce/notes\r\n", 13, 3);
+        red().apply(&mut s);
+        assert_eq!(s.row_text(0).trim_end(), "cd ~/notes");
     }
 
     #[test]
