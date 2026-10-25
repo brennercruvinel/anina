@@ -159,6 +159,9 @@ impl Redactor {
         if let Some(home) = std::env::var("HOME").ok().filter(|h| h.len() > 1) {
             r.literal_as("home path", home.trim_end_matches('/'), "~");
         }
+        for tmp in user_tmp() {
+            r.literal_as("temp path", &tmp, "$TMPDIR");
+        }
         for (k, v) in identity() {
             match k {
                 Who::User => r.word_as("user name", &v, "user"),
@@ -445,6 +448,24 @@ enum Who {
     Email,
 }
 
+/// `TMPDIR` when it is this user's own folder (macOS: `/var/folders/<id>/T`),
+/// as written and as the system resolves it (`/private/var/...`). The shared
+/// `/tmp` and `/var/tmp` name no one.
+pub fn user_tmp() -> Vec<String> {
+    user_tmp_from(std::env::var("TMPDIR").ok())
+}
+
+fn user_tmp_from(t: Option<String>) -> Vec<String> {
+    let Some(t) = t else { return Vec::new() };
+    let t = t.trim_end_matches('/').to_string();
+    if t.is_empty() || t == "/tmp" || t == "/var/tmp" {
+        return Vec::new();
+    }
+    let real = std::fs::canonicalize(&t).ok().map(|p| p.display().to_string()).filter(|r| *r != t);
+    // the longer form first, so `/private/var/...` is not left as `/private$TMPDIR`
+    real.into_iter().chain([t]).collect()
+}
+
 /// Who and where this is: user names, host names, git identity.
 fn identity() -> Vec<(Who, String)> {
     let mut out = Vec::new();
@@ -662,6 +683,21 @@ mod tests {
         let row = s.row_text(0);
         assert!(row.starts_with("~/notes"), "{row:?}");
         assert_eq!(row.find("|end"), Some(21), "{row:?}");
+    }
+
+    #[test]
+    fn a_per_user_temp_folder_is_hidden_and_found_but_tmp_is_not() {
+        assert!(user_tmp_from(Some("/tmp/".into())).is_empty());
+        assert!(user_tmp_from(Some("/var/tmp".into())).is_empty());
+        assert!(user_tmp_from(None).is_empty());
+        assert_eq!(user_tmp_from(Some("/nonexistent/mj/abc/T/".into())), ["/nonexistent/mj/abc/T"]);
+        let mut r = Redactor::default();
+        r.literal_as("temp path", "/private/var/folders/mj/abc/T", "$TMPDIR");
+        r.literal_as("temp path", "/var/folders/mj/abc/T", "$TMPDIR");
+        let line = "anina: svg -> /var/folders/mj/abc/T//tmp.X/eof.svg and /private/var/folders/mj/abc/T/y";
+        assert_eq!(r.text(line), "anina: svg -> $TMPDIR//tmp.X/eof.svg and $TMPDIR/y");
+        assert_eq!(r.leaks(line).len(), 2);
+        assert!(r.leaks("/tmp/tmp.X/eof.svg").is_empty());
     }
 
     #[test]

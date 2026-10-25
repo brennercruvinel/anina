@@ -29,7 +29,15 @@ pub struct Spec {
 
 impl Spec {
     pub fn new(program: impl Into<String>, args: Vec<String>) -> Self {
-        Spec { program: program.into(), args, cwd: None, env: Vec::new(), clean_env: false, cols: 100, rows: 30 }
+        Spec { program: program.into(), args, cwd: None, env: default_env(), clean_env: false, cols: 100, rows: 30 }
+    }
+
+    /// Set a variable for the program, replacing an earlier value of it (a
+    /// default, or the same name set twice).
+    pub fn set_env(&mut self, k: impl Into<String>, v: impl Into<String>) {
+        let k = k.into();
+        self.env.retain(|(n, _)| *n != k);
+        self.env.push((k, v.into()));
     }
 
     /// Program and arguments, wrapped in `env -i K=V...` for a clean
@@ -51,6 +59,13 @@ impl Spec {
         args.extend(self.args.iter().cloned());
         ("/usr/bin/env".into(), args)
     }
+}
+
+/// What every program gets unless the caller sets it. macOS's `/bin/bash`
+/// (3.2) opens with a notice that the default shell is now zsh, and that notice
+/// would sit at the top of every recording of a bash tape.
+fn default_env() -> Vec<(String, String)> {
+    if cfg!(target_os = "macos") { vec![("BASH_SILENCE_DEPRECATION_WARNING".into(), "1".into())] } else { Vec::new() }
 }
 
 /// Terminal modes by name (`alt_screen`, `cursor_visible`, `mouse_*`,
@@ -181,5 +196,29 @@ pub fn wait_idle(
         if Instant::now() >= end {
             return Ok((false, last));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tape_value_replaces_a_default_instead_of_repeating_it() {
+        let mut s = Spec::new("bash", vec![]);
+        s.set_env("BASH_SILENCE_DEPRECATION_WARNING", "0");
+        s.set_env("A", "1");
+        s.set_env("A", "2");
+        let get = |k: &str| s.env.iter().filter(|(n, _)| n == k).map(|(_, v)| v.as_str()).collect::<Vec<_>>();
+        assert_eq!(get("BASH_SILENCE_DEPRECATION_WARNING"), ["0"]);
+        assert_eq!(get("A"), ["2"]);
+    }
+
+    #[test]
+    fn macos_bash_starts_without_its_zsh_notice() {
+        let s = Spec { clean_env: true, ..Spec::new("bash", vec![]) };
+        let (_, args) = s.argv();
+        let quiet = args.iter().any(|a| a == "BASH_SILENCE_DEPRECATION_WARNING=1");
+        assert_eq!(quiet, cfg!(target_os = "macos"));
     }
 }

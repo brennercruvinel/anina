@@ -53,7 +53,7 @@ pub fn run(a: Args) -> Result<()> {
     };
     for kv in &a.env {
         let (k, v) = kv.split_once('=').ok_or_else(|| anyhow!("--env takes K=V, got {kv:?}"))?;
-        spec.env.push((k.into(), v.into()));
+        spec.set_env(k, v);
     }
     let out = a.out.clone().unwrap_or_else(|| default_out(&a.command[0]));
     eprintln!("anina init: recording {}; {} stops", a.command.join(" "), a.stop_key);
