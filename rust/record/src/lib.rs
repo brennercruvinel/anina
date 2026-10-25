@@ -203,7 +203,9 @@ impl Rec {
         spec.cols = self.cfg.cols;
         spec.rows = self.cfg.rows;
         spec.cwd = self.cfg.cwd.clone();
-        spec.env = self.cfg.env.clone();
+        for (k, v) in &self.cfg.env {
+            spec.set_env(k, v);
+        }
         spec.clean_env = self.cfg.clean_env;
         self.eng.spawn(&spec)?;
         self.started = true;

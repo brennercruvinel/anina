@@ -78,7 +78,8 @@ pub fn wait_failed(screen: &Screen, pat: &Pattern, gone: bool, secs: f64, dump: 
 }
 
 /// A path the way a status line shows it: relative to the working directory
-/// when it is under it, `~/...` under HOME, as is otherwise. Output pasted into
+/// when it is under it, `$TMPDIR/...` under a per-user temp folder (macOS's
+/// `/var/folders/<id>/T`), `~/...` under HOME, as is otherwise. Output pasted into
 /// a README or an issue then names no machine. A working directory at `/` or
 /// above HOME (`/Users`) does not count: relative to it, a path would still
 /// spell out the user's folder.
@@ -87,10 +88,25 @@ pub fn shown(p: &std::path::Path) -> String {
         .map(|c| vec![std::fs::canonicalize(&c).unwrap_or_else(|_| c.clone()), c])
         .unwrap_or_default();
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    shown_from(p, &cwd, home.as_deref())
+    shown_from(p, &cwd, home.as_deref(), &user_tmp())
 }
 
-fn shown_from(p: &std::path::Path, cwd: &[std::path::PathBuf], home: Option<&std::path::Path>) -> String {
+/// `TMPDIR` as written and as resolved, when it is not the shared `/tmp`.
+fn user_tmp() -> Vec<std::path::PathBuf> {
+    let Some(t) = std::env::var_os("TMPDIR").map(std::path::PathBuf::from) else { return Vec::new() };
+    if t.parent().is_none() || t == std::path::Path::new("/tmp") || t == std::path::Path::new("/var/tmp") {
+        return Vec::new();
+    }
+    let real = std::fs::canonicalize(&t).ok().filter(|r| *r != t);
+    [t].into_iter().chain(real).collect()
+}
+
+fn shown_from(
+    p: &std::path::Path,
+    cwd: &[std::path::PathBuf],
+    home: Option<&std::path::Path>,
+    tmp: &[std::path::PathBuf],
+) -> String {
     if !p.is_absolute() {
         return p.display().to_string();
     }
@@ -98,6 +114,9 @@ fn shown_from(p: &std::path::Path, cwd: &[std::path::PathBuf], home: Option<&std
     let above_home = |d: &std::path::Path| d.parent().is_none() || home.is_some_and(|h| h != d && h.starts_with(d));
     if let Some(r) = cwd.iter().filter(|d| !above_home(d)).find_map(|d| rel(d)) {
         return if r.is_empty() { ".".into() } else { r };
+    }
+    if let Some(r) = tmp.iter().find_map(|d| rel(d)) {
+        return if r.is_empty() { "$TMPDIR".into() } else { format!("$TMPDIR/{r}") };
     }
     if let Some(r) = home.filter(|h| h.parent().is_some()).and_then(rel) {
         return if r.is_empty() { "~".into() } else { format!("~/{r}") };
@@ -114,13 +133,24 @@ mod tests {
     fn a_path_names_no_machine_from_any_working_directory() {
         let home = Some(Path::new("/home/runner"));
         let out = Path::new("/home/runner/anina-out/shell/index.html");
-        let at = |d: &str| shown_from(out, &[PathBuf::from(d)], home);
+        let at = |d: &str| shown_from(out, &[PathBuf::from(d)], home, &[]);
         assert_eq!(at("/home/runner/anina-out"), "shell/index.html");
         assert_eq!(at("/home/runner"), "anina-out/shell/index.html");
         assert_eq!(at("/"), "~/anina-out/shell/index.html");
         assert_eq!(at("/home"), "~/anina-out/shell/index.html");
         assert_eq!(at("/srv"), "~/anina-out/shell/index.html");
-        assert_eq!(shown_from(Path::new("/tmp/x.svg"), &[PathBuf::from("/")], home), "/tmp/x.svg");
-        assert_eq!(shown_from(out, &[], Some(Path::new("/"))), out.display().to_string());
+        assert_eq!(shown_from(Path::new("/tmp/x.svg"), &[PathBuf::from("/")], home, &[]), "/tmp/x.svg");
+        assert_eq!(shown_from(out, &[], Some(Path::new("/")), &[]), out.display().to_string());
+    }
+
+    #[test]
+    fn a_per_user_temp_folder_shows_as_tmpdir() {
+        let home = Some(Path::new("/Users/alice"));
+        let tmp = [PathBuf::from("/var/folders/mj/abc123/T"), PathBuf::from("/private/var/folders/mj/abc123/T")];
+        let at = |p: &str| shown_from(Path::new(p), &[PathBuf::from("/Users/alice/proj")], home, &tmp);
+        assert_eq!(at("/var/folders/mj/abc123/T/tmp.X/eof/eof.svg"), "$TMPDIR/tmp.X/eof/eof.svg");
+        assert_eq!(at("/private/var/folders/mj/abc123/T/x.svg"), "$TMPDIR/x.svg");
+        assert_eq!(at("/Users/alice/proj/out/x.svg"), "out/x.svg");
+        assert_eq!(at("/tmp/x.svg"), "/tmp/x.svg");
     }
 }

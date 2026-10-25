@@ -159,6 +159,9 @@ impl Redactor {
         if let Some(home) = std::env::var("HOME").ok().filter(|h| h.len() > 1) {
             r.literal_as("home path", home.trim_end_matches('/'), "~");
         }
+        for tmp in user_tmp() {
+            r.literal_as("temp path", &tmp, "$TMPDIR");
+        }
         for (k, v) in identity() {
             match k {
                 Who::User => r.word_as("user name", &v, "user"),
@@ -332,6 +335,15 @@ impl Redactor {
                 let cells: Vec<Cell> = (y0..=y1).flat_map(|y| screen.row(y).to_vec()).collect();
                 let (text, at) = row_map(&cells);
                 let Some((start, end, with)) = rule.find(&text, &at, &cells) else { break };
+                // `continues` guesses: a row that fills the width and is followed by
+                // text looks wrapped. A match inside one row is spliced in that row,
+                // so the rows after it never move up into a line they are not part of.
+                let cols = screen.cols as usize;
+                if start / cols == (end - 1) / cols {
+                    let y = y0 + (start / cols) as u16;
+                    splice(screen, y, start % cols, start % cols + (end - start), &with);
+                    continue;
+                }
                 let spare = cells.iter().rev().take_while(|c| c.ch == " ").count();
                 let room = end - start + spare;
                 let mut seq = cells[..start].to_vec();
@@ -443,6 +455,24 @@ enum Who {
     Host,
     Name,
     Email,
+}
+
+/// `TMPDIR` when it is this user's own folder (macOS: `/var/folders/<id>/T`),
+/// as written and as the system resolves it (`/private/var/...`). The shared
+/// `/tmp` and `/var/tmp` name no one.
+pub fn user_tmp() -> Vec<String> {
+    user_tmp_from(std::env::var("TMPDIR").ok())
+}
+
+fn user_tmp_from(t: Option<String>) -> Vec<String> {
+    let Some(t) = t else { return Vec::new() };
+    let t = t.trim_end_matches('/').to_string();
+    if t.is_empty() || t == "/tmp" || t == "/var/tmp" {
+        return Vec::new();
+    }
+    let real = std::fs::canonicalize(&t).ok().map(|p| p.display().to_string()).filter(|r| *r != t);
+    // the longer form first, so `/private/var/...` is not left as `/private$TMPDIR`
+    real.into_iter().chain([t]).collect()
 }
 
 /// Who and where this is: user names, host names, git identity.
@@ -662,6 +692,37 @@ mod tests {
         let row = s.row_text(0);
         assert!(row.starts_with("~/notes"), "{row:?}");
         assert_eq!(row.find("|end"), Some(21), "{row:?}");
+    }
+
+    #[test]
+    fn a_row_that_fills_the_width_keeps_the_next_row_in_place() {
+        // 20 columns: the first row is full, the next is output that only looks like its tail
+        let mut s = anina_screen::escape::parse("ab /Users/alice/xyzw\r\nhello\r\n", 20, 3);
+        red().apply(&mut s);
+        assert_eq!(s.row_text(0).trim_end(), "ab ~/xyzw");
+        assert_eq!(s.row_text(1).trim_end(), "hello");
+    }
+
+    #[test]
+    fn a_path_cut_by_the_wrap_is_still_hidden() {
+        let mut s = anina_screen::escape::parse("cd /Users/ali\r\nce/notes\r\n", 13, 3);
+        red().apply(&mut s);
+        assert_eq!(s.row_text(0).trim_end(), "cd ~/notes");
+    }
+
+    #[test]
+    fn a_per_user_temp_folder_is_hidden_and_found_but_tmp_is_not() {
+        assert!(user_tmp_from(Some("/tmp/".into())).is_empty());
+        assert!(user_tmp_from(Some("/var/tmp".into())).is_empty());
+        assert!(user_tmp_from(None).is_empty());
+        assert_eq!(user_tmp_from(Some("/nonexistent/mj/abc/T/".into())), ["/nonexistent/mj/abc/T"]);
+        let mut r = Redactor::default();
+        r.literal_as("temp path", "/private/var/folders/mj/abc/T", "$TMPDIR");
+        r.literal_as("temp path", "/var/folders/mj/abc/T", "$TMPDIR");
+        let line = "anina: svg -> /var/folders/mj/abc/T//tmp.X/eof.svg and /private/var/folders/mj/abc/T/y";
+        assert_eq!(r.text(line), "anina: svg -> $TMPDIR//tmp.X/eof.svg and $TMPDIR/y");
+        assert_eq!(r.leaks(line).len(), 2);
+        assert!(r.leaks("/tmp/tmp.X/eof.svg").is_empty());
     }
 
     #[test]

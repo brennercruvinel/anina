@@ -896,7 +896,9 @@ pub fn run(a: Args) -> Result<()> {
     spec.cols = a.cols;
     spec.rows = a.rows;
     spec.cwd = cwd;
-    spec.env = env;
+    for (k, v) in env {
+        spec.set_env(k, v);
+    }
     spec.clean_env = clean_env;
     let engine_name = a.engine.clone();
     let before = a.before.clone();
