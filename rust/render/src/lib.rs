@@ -90,7 +90,7 @@ pub fn run(a: &Request, notice: &dyn Notice) -> Result<()> {
         notice.status(&format!("README snippet -> {}\n{snippet}", anina_screen::lesson::shown(&p)));
     }
     if a.poster && !cast.frames.is_empty() {
-        let f = &cast.frames[cast.poster.min(cast.frames.len() - 1)];
+        let f = &cast.frames[cast.poster_frame()];
         let p = out.with_file_name(format!(
             "{}-poster.png",
             out.file_stem().map_or("out".into(), |s| s.to_string_lossy().into_owned())

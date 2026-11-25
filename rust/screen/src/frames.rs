@@ -82,6 +82,20 @@ impl Cast {
         crate::escape::parse(&self.screens[i], self.cols, self.rows)
     }
 
+    /// The frame a still shows: the one the tape marked with `Poster`. A tape
+    /// that marks none leaves the first frame, often the empty screen before
+    /// the program drew; then the last frame that shows something stands for
+    /// the recording.
+    pub fn poster_frame(&self) -> usize {
+        let last = self.frames.len().saturating_sub(1);
+        let marked = self.poster.min(last);
+        let shows = |i: usize| self.frames.get(i).is_some_and(|f| !self.screen(f.s).text().trim().is_empty());
+        if shows(marked) {
+            return marked;
+        }
+        (0..=last).rev().find(|i| shows(*i)).unwrap_or(marked)
+    }
+
     /// Recording length in seconds, the end hold included.
     pub fn duration(&self) -> f64 {
         self.frames.last().map_or(0.0, |f| f.t) + self.end_hold
@@ -143,4 +157,23 @@ pub fn now_iso() -> String {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_still_shows_the_marked_frame_or_else_the_last_one_with_something_on_it() {
+        let json = r#"{"version":2,"title":"t","cols":10,"rows":2,"screens":["","ready","done",""],
+            "frames":[{"t":0.0,"s":0,"cursor":null},{"t":0.5,"s":1,"cursor":null},{"t":1.0,"s":2,"cursor":null},{"t":1.5,"s":3,"cursor":null}]}"#;
+        let mut cast: Cast = serde_json::from_str(json).unwrap();
+        // no `Poster` in the tape: not the empty first screen, nor the empty one the program left
+        assert_eq!(cast.poster_frame(), 2);
+        cast.poster = 1;
+        assert_eq!(cast.poster_frame(), 1);
+        // a recording that never drew keeps the frame it had
+        cast.screens = vec![String::new(); 4];
+        assert_eq!(cast.poster_frame(), 1);
+    }
 }

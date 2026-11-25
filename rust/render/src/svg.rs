@@ -406,7 +406,7 @@ pub fn render_cast(cast: &Cast, th: &Theme, opts: &Options) -> Result<Rendered> 
     let (tl, total) = timeline(cast, max_hold, opts.speed.max(0.01), max_fps);
     let total = total.max(0.01);
     // the poster: the first slot showing the marked frame or a later one
-    let poster = tl.iter().find(|(_, _, i)| *i >= cast.poster).map_or(0.0, |s| s.0);
+    let poster = tl.iter().find(|(_, _, i)| *i >= cast.poster_frame()).map_or(0.0, |s| s.0);
 
     // screens: one group per (screen, cursor), shown during its intervals
     let mut groups: Vec<(GroupKey, Vec<(f64, f64)>)> = Vec::new();
@@ -556,7 +556,7 @@ pub fn transcript(cast: &Cast) -> String {
         }
     }
     if steps.iter().all(|(c, _)| c.is_empty()) && !cast.frames.is_empty() {
-        steps = vec![(String::new(), cast.poster.min(cast.frames.len() - 1)), (String::new(), cast.frames.len() - 1)];
+        steps = vec![(String::new(), cast.poster_frame()), (String::new(), cast.frames.len() - 1)];
         steps.dedup_by_key(|s| s.1);
     }
     for (caption, last) in steps {
