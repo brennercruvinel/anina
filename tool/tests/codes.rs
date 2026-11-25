@@ -77,11 +77,19 @@ fn two_runs_that_differ_end_with_5_and_two_alike_with_0() {
     for (folder, text) in [("a", "one\n"), ("b", "two\n"), ("c", "one\n")] {
         std::fs::create_dir_all(dir.join(folder)).unwrap();
         std::fs::write(dir.join(folder).join("screen.txt"), text).unwrap();
+        // what marks a folder as one anina wrote
+        std::fs::write(dir.join(folder).join("run.json"), "{}").unwrap();
     }
     let (code, said) = ends(anina().current_dir(&dir).args(["compare", "a", "b"]));
     assert_eq!(code, Some(5), "{said}");
     assert!(said.starts_with("anina: 1 difference ("), "{said}");
     assert_eq!(ends(anina().current_dir(&dir).args(["compare", "a", "c"])).0, Some(0));
+    // a folder anina did not write is an argument that is wrong, not a run that differs
+    std::fs::create_dir_all(dir.join("other")).unwrap();
+    std::fs::write(dir.join("other/screen.txt"), "one\n").unwrap();
+    let (code, said) = ends(anina().current_dir(&dir).args(["compare", "other", "a"]));
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.starts_with("anina: other is not a folder anina wrote"), "{said}");
 }
 
 /// The same program `leaks` audits: red whatever the terminal announced, so
