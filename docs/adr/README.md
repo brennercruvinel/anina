@@ -13,9 +13,12 @@ Why anina is built the way it is. `kind: decision` records a choice between opti
 | [0007](0007-nothing-about-one-program-in-the-core.md) | decision | Nothing about any one program in the core; programs live in presets |
 | [0008](0008-mask-what-changes-by-itself.md) | decision | Mask the cells that change by themselves |
 | [0009](0009-one-folder-per-run-with-stable-names.md) | decision | One output folder per run, with stable screen names |
+| [0010](0010-equal-length-siblings-and-a-shared-lexicon.md) | decision | Sibling names share a length; what the world named keeps its name |
 | [0013](0013-a-workspace-of-layered-crates.md) | decision | Split anina into a workspace of layered crates |
 | [0014](0014-code-and-cli-speak-to-different-readers.md) | decision | The code and the CLI speak to different readers |
 | [0015](0015-waits-that-hold-until-the-program-answered.md) | lesson | A written wait holds until the program answered, in every terminal |
 | [0016](0016-put-back-only-what-a-play-changed.md) | decision | Put back only what a play changed in the sandbox |
+
+0011 and 0012 were reserved for a design system read from the screen and for one timeline with many writers. Neither was written and nothing cites them, so the two numbers stay unused.
 
 A new ADR takes the next number, follows `TEMPLATE.md` and joins this table.

@@ -5,7 +5,7 @@ kind: decision
 status: accepted
 category: STRUCTURE
 date: 2026-10-07
-last-updated: 2026-10-07
+last-updated: 2026-11-25
 tags: [rust, workspace, crates]
 supersedes: []
 superseded-by: null
@@ -37,7 +37,7 @@ One crate per layer under `rust/`, each one depending only on the layers below. 
 
 ## Decision
 
-A virtual workspace (`members = ["rust/*"]`) of nine crates. Shared metadata and dependency versions live in the root `Cargo.toml`; each crate states what it inherits and what it uses.
+A virtual workspace (`members = ["rust/*"]`) of five crates. Shared metadata and dependency versions live in the root `Cargo.toml`; each crate states what it inherits and what it uses.
 
 | crate | package | depends on |
 | --- | --- | --- |
@@ -46,9 +46,10 @@ A virtual workspace (`members = ["rust/*"]`) of nine crates. Shared metadata and
 | `rust/render` | `anina-render` | screen |
 | `rust/record` | `anina-record` | screen, runner, render |
 | `rust/binary` | `anina` | screen, runner, render, record |
-| `rust/codecs`, `rust/design`, `rust/motion`, `rust/recode` | `anina-codecs`, `anina-design`, `anina-motion`, `anina-recode` | none yet |
 
 Modules took names of equal length on the way (see ADR-0010): `ansi`, `cast` and `teach` became `screen::escape`, `frames` and `lesson`; `tape`, `volatile` and `privacy` became `runner::script`, `masker` and `redact`; `sandbox` became `record::cordon`; `audit`, `explore`, `init` and `check` became the binary's `audits`, `mapper`, `taping` and `checks`. `docs/CHANGELOG` has the full list.
+
+The split first made nine crates: `codecs`, `design`, `motion` and `recode` came along empty, one doc line each. They were removed before v0.1.0 (issue #119). A folder with no code has to be explained and says nothing about what comes next. A crate comes back the day its first line is written.
 
 `data/theme` and `demo/` sit outside the crates that embed them, and `cargo package` only ships what is inside a crate. Two symlinks bring them in: `rust/render/assets -> ../../data/theme` and `rust/record/demo -> ../../demo`. The tree stays as it is and `cargo package --workspace` passes.
 
@@ -58,20 +59,20 @@ Modules took names of equal length on the way (see ADR-0010): `ansi`, `cast` and
 
 - A wrong-way dependency fails to compile.
 - `cargo check -p anina-screen` builds the bottom layer alone.
-- The empty crates have a place and no reach until someone depends on them.
+- Every crate in `rust/` holds code: `ls rust/` is the list of layers.
 
 ### Negative or accepted trade-offs
 
 - A clone on Windows needs `git config core.symlinks true` to build.
 - The `leaks` test lives in `tool/tests/`, outside `rust/binary`: it runs in the repo and in CI but is not in the published package.
 - `cargo package -p anina` alone fails until the `anina-*` crates are on crates.io; validate with `cargo package --workspace`.
-- cargo-release sees nine crates: `tag-name = "v{{version}}"` at the root and `tag = false` in the eight inner crates keep one `v0.1.0` tag.
+- cargo-release sees five crates: `tag-name = "v{{version}}"` at the root and `tag = false` in the four inner crates keep one `v0.1.0` tag.
 
 ### Follow-up
 
-- `anina-codecs`, `anina-design`, `anina-motion` and `anina-recode` join `[workspace.dependencies]` when a crate first depends on them.
+- A new crate enters `rust/` with its first line of code, and joins `[workspace.dependencies]` when another crate first depends on it.
 
 ## References
 
 - ADR-0003, ADR-0010
-- Issue #1 (the migration plan)
+- Issue #1 (the migration plan), issue #119 (the empty crates removed)

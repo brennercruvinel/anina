@@ -1,29 +1,21 @@
-# anIna is the best friend of terminal freaks
+# anina is the best friend of terminal freaks
 
-** Audit, map, redact and record terminal **
+**Audit, map, redact and record terminal programs.**<br>
+Run them safely, in a fresh HOME or under the OS sandbox: `sandbox-exec` on macOS, `bwrap` on Linux.<br>
+Create beautiful animated READMEs for TUI apps: the one below is 20 s of truecolor in a 425 KB SVG, self-contained, no GIF.
 
-Run in safety portable &b safety VM sandbox 
+Works with ratatui and Bubble Tea. The perfect tool for lazy devs.
 
-create beautiful animatios readmes for tui apps 
+Reject modernity, embrace tradition. **WE LOVE TUI.**
 
-## 20s of truecolor live animation in 425 KB SVG (no GIF)
-truecolor and live animation, self-contained
-
-works with ratatui and bunble tea
-
-the perfect tool for lazy devs
-
-# reject modernity embrace tradition
-### WE LOVE TUI
-
-<p align="center"><img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"></p>
-
+<p align="center">
+  <img src="docs/img/urna-tui.svg" alt="anina recording urna's TUI: open a corpus, ask it, read the cited answer" width="100%"><br>
+  <sub>Recorded by <code>anina run urna</code>: a ratatui app with braille art</sub>
+</p>
 
 anina runs a program in a real terminal and reads its screen the way you do, cell by cell, colors and all. It never asks which framework drew the screen. ratatui, Textual, Bubble Tea and a plain `printf` all look the same to it.
 
-Explainig for a 13y kid: this is like Lighthouse + Playwright + VHS, for audit terminal apps local, in a locked native VMs
-and create beautifuk readmes for tui a
-<sub>Recorded by `anina run urna`: a ratatui app with braille art</sub>
+Explained to a 13-year-old: it is like Lighthouse + Playwright + VHS for terminal apps. It audits them and drives them on your own machine, inside the OS's native sandbox when you ask for it, and records what happened as the animation for your README.
 
 ## What it found so far
 
@@ -112,7 +104,7 @@ anina waits on what the screen shows, never on the clock. Cells that change by t
 
 The SVG is one looping timeline with an embedded subset of JetBrains Mono, so it looks the same everywhere, `<img>` on GitHub included. PNGs come from the same SVG through resvg, no browser.
 
-The code is a workspace of nine crates in [`rust/`](rust), layered from the screen up to the binary. The crates `codecs`, `design`, `motion` and `recode` are still empty. They hold what comes next: a design system read from the screen, a timeline lighter than a GIF, and the tree rewritten for another framework. The reasons behind each choice are in [`docs/adr/`](docs/adr).
+The code is a workspace of five crates in [`rust/`](rust), layered from the screen up to the binary: `screen`, then `runner` and `render`, then `record`, then `binary`. The reasons behind each choice are in [`docs/adr/`](docs/adr).
 
 ## Limits
 

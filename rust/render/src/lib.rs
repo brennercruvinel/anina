@@ -4,8 +4,8 @@
 pub mod brand;
 pub mod fonts;
 pub mod index;
-pub mod pixel;
-pub mod shape;
+pub mod png;
+pub mod svg;
 pub mod theme;
 
 use anina_screen::frames::Cast;
@@ -54,7 +54,7 @@ fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
 pub fn run(a: Args) -> Result<()> {
     let cast = Cast::load(&a.cast)?;
     let th = Theme::resolve(a.theme.as_deref(), &cast)?;
-    let opts = shape::Options { max_hold: a.max_hold, speed: a.speed, max_fps: a.max_fps, embed_font: !a.no_font };
+    let opts = svg::Options { max_hold: a.max_hold, speed: a.speed, max_fps: a.max_fps, embed_font: !a.no_font };
     let out = a.out.clone().unwrap_or_else(|| {
         let s = a.cast.to_string_lossy();
         PathBuf::from(format!("{}.svg", s.trim_end_matches(".gz").trim_end_matches(".json").trim_end_matches(".cast")))
@@ -67,8 +67,8 @@ pub fn run(a: Args) -> Result<()> {
         _ => vec![(out.clone(), th.clone())],
     };
     for (path, t) in &variants {
-        let r = shape::render_cast(&cast, t, &opts)?;
-        shape::write(path, &r.svg)?;
+        let r = svg::render_cast(&cast, t, &opts)?;
+        svg::write(path, &r.svg)?;
         let gz = gzip_len(r.svg.as_bytes());
         eprintln!(
             "anina: {} frames, {} rows, {:.1}s, poster at {:.1}s, {} KB ({} KB gzip) -> {}",
@@ -81,14 +81,14 @@ pub fn run(a: Args) -> Result<()> {
             anina_screen::lesson::shown(path)
         );
     }
-    shape::write(&out.with_extension("txt"), &shape::transcript(&cast))?;
+    svg::write(&out.with_extension("txt"), &svg::transcript(&cast))?;
     if variants.len() == 2 {
         let name = |p: &Path| p.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
         let snippet = format!(
             "<picture>\n  <source media=\"(prefers-color-scheme: light)\" srcset=\"{}\">\n  <img src=\"{}\" alt=\"{}\">\n</picture>\n",
             name(&variants[1].0),
             name(&variants[0].0),
-            shape::esc(&cast.title)
+            svg::esc(&cast.title)
         );
         let p = out.with_extension("picture.html");
         std::fs::write(&p, &snippet)?;
@@ -100,7 +100,7 @@ pub fn run(a: Args) -> Result<()> {
             "{}-poster.png",
             out.file_stem().map_or("out".into(), |s| s.to_string_lossy().into_owned())
         ));
-        pixel::screen_png_with(&cast.screen(f.s), &cast.title, &th, &p)?;
+        png::screen_png_with(&cast.screen(f.s), &cast.title, &th, &p)?;
         eprintln!("anina: poster -> {}", anina_screen::lesson::shown(&p));
     }
     Ok(())

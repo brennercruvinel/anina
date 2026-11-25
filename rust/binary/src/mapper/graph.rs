@@ -518,7 +518,7 @@ impl Graph {
             std::fs::write(screens.join(format!("s{}.ansi", s.id)), s.screen.to_ansi())?;
             if png_ok {
                 let title = format!("s{} · {}", s.id, s.title);
-                match anina_render::pixel::screen_png(&s.screen, &title, "", &screens.join(format!("s{}.png", s.id))) {
+                match anina_render::png::screen_png(&s.screen, &title, "", &screens.join(format!("s{}.png", s.id))) {
                     Ok(()) => pngs += 1,
                     Err(_) => png_ok = false, // no renderer: stop trying
                 }

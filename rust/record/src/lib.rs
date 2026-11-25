@@ -411,8 +411,7 @@ impl Rec {
         if self.opts.png {
             let title =
                 if self.cfg.title.is_empty() { name.to_string() } else { format!("{} · {name}", self.cfg.title) };
-            if let Err(e) =
-                anina_render::pixel::screen_png(s, &title, &self.cfg.theme, &dir.join(format!("{name}.png")))
+            if let Err(e) = anina_render::png::screen_png(s, &title, &self.cfg.theme, &dir.join(format!("{name}.png")))
             {
                 self.warnings.push(format!("Snap {name}: no png ({e})"));
             }
@@ -581,7 +580,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
     }
     if !a.no_render {
         let svg = out.join(format!("{name}.svg"));
-        anina_render::shape::write_cast_svg(&rec.cast, a.theme.as_deref(), &svg)?;
+        anina_render::svg::write_cast_svg(&rec.cast, a.theme.as_deref(), &svg)?;
         eprintln!("anina: svg -> {}", anina_screen::lesson::shown(&svg));
     }
     Ok(out)

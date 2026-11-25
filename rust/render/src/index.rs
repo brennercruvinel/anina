@@ -1,7 +1,7 @@
 //! The HTML index of a run: every screenshot as a card, plus links to the
 //! map, animations and reports.
 
-use super::shape::esc;
+use super::svg::esc;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 

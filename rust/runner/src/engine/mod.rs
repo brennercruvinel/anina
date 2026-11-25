@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-pub mod inner;
-pub mod outer;
+pub mod tmux;
+pub mod tuitest;
 
 /// What to run and in which terminal.
 #[derive(Clone, Debug)]
@@ -90,8 +90,8 @@ pub trait Engine {
 /// Build an engine by name: `tui-test` (default, in process) or `tmux`.
 pub fn by_name(name: &str) -> Result<Box<dyn Engine>> {
     match name {
-        "" | "tui-test" | "tuitest" => Ok(Box::new(inner::TuiTest::default())),
-        "tmux" => Ok(Box::new(outer::Tmux::default())),
+        "" | "tui-test" | "tuitest" => Ok(Box::new(tuitest::TuiTest::default())),
+        "tmux" => Ok(Box::new(tmux::Tmux::default())),
         other => bail!("unknown engine {other:?} (tui-test, tmux)"),
     }
 }

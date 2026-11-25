@@ -1,5 +1,5 @@
 //! A cast as one animated, self-contained SVG (and a screen as a static one,
-//! which `pixel` rasterizes).
+//! which `png` rasterizes).
 //!
 //! The technique of a hand-made terminal demo, generalized: a window drawn in
 //! SVG and SMIL `<animate>` on one shared, looping timeline, so it plays in a

@@ -23,19 +23,21 @@
 - A literal `Wait` matches text the terminal wrapped at its edge: a typed line longer than 60 columns no longer fails its wait in the 60x20 audit terminal.
 - A preset's sandbox with a socket, a FIFO or a read-only folder (Go's module cache) no longer breaks `audit --preset`, and a second `anina run` can empty it. Each sandbox keeps its saved copy under `pristine/<name>` in the cache: two presets whose names differ after a dot no longer share one.
 - A wrong `--part` fails before the sandbox is emptied and prepare runs; it used to fail after a clone and a release build. A preset is looked up once per run, so a built-in one is extracted once.
-- `anina presets` no longer lists the empty folders in `demo/` as invalid built-in presets, and `anina run` refuses them by name.
+- `anina presets` no longer lists a folder in `demo/` without a `preset.toml` as an invalid built-in preset, and `anina run` refuses it by name.
 
 ### Changed
 
 - The run's part line reads `part 1/1 edit · title` (a middle dot instead of a dash), so the output pastes into docs as is.
-- One crate became a workspace of nine under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary, plus `anina-codecs`, `anina-design`, `anina-motion` and `anina-recode`, empty for now. Commands, flags and output are the same.
+- One crate became a workspace of five under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary. Commands, flags and output are the same. The split first carried four more crates with no code (`anina-codecs`, `anina-design`, `anina-motion`, `anina-recode`); they are gone, and a crate comes back the day its first line is written.
 - Modules renamed on the way:
   - `ansi`, `cast`, `teach` -> `anina_screen::escape`, `frames`, `lesson`
-  - `engine::tuitest`, `engine::tmux` -> `anina_runner::engine::inner`, `outer`
+  - `engine::tuitest`, `engine::tmux` -> `anina_runner::engine::tuitest`, `tmux`, names kept
   - `tape`, `volatile`, `privacy` -> `anina_runner::script`, `masker`, `redact`
-  - `render::font`, `gallery`, `png`, `svg` -> `anina_render::fonts`, `index`, `pixel`, `shape`; `brand` -> `anina_render::brand`
+  - `render::font`, `gallery` -> `anina_render::fonts`, `index`; `render::png`, `svg` and `brand` -> `anina_render::png`, `svg` and `brand`, names kept
   - `record` -> `anina_record`; `sandbox` (`fsdiff`) -> `anina_record::cordon` (`diffs`); `preset::manifest`, `report` -> `anina_record::preset::specs`, `print`
   - `audit` (`contrast`, `matrix`, `measure`, `report`) -> `audits` (`ratio`, `cases`, `meter`, `print`)
   - `explore` -> `mapper`; `init` (`keys`, `passthrough`, `tapegen`) -> `taping` (`input`, `relay`, `print`); `check` -> `checks`
+- A module that holds one thing the world already named keeps that name, whatever its length: an engine, a file format, an operating system (ADR-0010). The engines and the SVG and PNG writers were `inner`, `outer`, `shape` and `pixel` for seven weeks of this cycle and are `tuitest`, `tmux`, `svg` and `png` again. Every other module keeps the name the split gave it.
 - `presets/` is `demo/`. The CI workflow is `gatecheck.yml`.
+- The folders that held only a `.gitkeep` are gone: seven under `demo/` (presets still to come) and `pkgs/` with its four. Every folder in `demo/` is a preset.
 - Releases are tagged `v{{version}}` for the whole workspace.
