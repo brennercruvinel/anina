@@ -14,8 +14,9 @@ pub mod specs;
 use crate::cordon::diffs::{Differ, Snapshot};
 use crate::cordon::{Mode, Sandbox};
 use crate::{Config, Options};
-use anina_runner::redact::Redactor;
+use anina_runner::redact::{Redactor, scope::Scope};
 use anina_runner::script::{Tape, expand};
+use anina_screen::notice::Notice;
 use anyhow::{Context, Result, anyhow, bail};
 use include_dir::{Dir, include_dir};
 use specs::Manifest;
@@ -26,33 +27,24 @@ use std::time::Instant;
 
 static BUILTIN: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/demo");
 
-#[derive(clap::Args, Debug)]
-pub struct Args {
-    /// Preset name or directory
-    pub preset: String,
-    /// Run only these parts (repeatable; default: all, in order)
-    #[arg(long)]
+/// What `run` is asked of the preset `load` returned.
+#[derive(Clone, Debug)]
+pub struct Request {
+    /// Run only these parts; all of them, in order, when empty.
     pub part: Vec<String>,
-    /// Output directory (default: anina-out/<preset>)
-    #[arg(short, long)]
+    /// Output directory; `anina-out/<preset>` when none.
     pub out: Option<PathBuf>,
-    /// Terminal engine: tui-test (default) or tmux
-    #[arg(long, default_value = "tui-test")]
+    /// Terminal engine: `tui-test` or `tmux`.
     pub engine: String,
-    /// Sandbox mode, over the preset's: off, env, strict
-    #[arg(long)]
+    /// Sandbox mode, over the preset's: `off`, `env`, `strict`.
     pub sandbox: Option<String>,
-    /// Set a preset variable, K=V (the environment works too)
-    #[arg(long = "var", value_name = "K=V")]
+    /// Preset variables, `K=V` (the environment works too).
     pub vars: Vec<String>,
-    /// Extra redaction, REGEX=REPLACEMENT
-    #[arg(long = "redact", value_name = "RE=WITH")]
+    /// Extra redaction, `REGEX=REPLACEMENT`.
     pub redact: Vec<String>,
-    /// Keep the sandbox of the last run instead of starting empty
-    #[arg(long)]
+    /// Keep the sandbox of the last run instead of starting empty.
     pub keep: bool,
-    /// Put the images inside index.html: one file to share
-    #[arg(long)]
+    /// Put the images inside index.html: one file to share.
     pub embed: bool,
 }
 
@@ -107,7 +99,7 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
         dir.extract(&dest).with_context(|| format!("extracting the {name} preset"))?;
         return Ok(dest.join(name));
     }
-    let known: Vec<String> = list_all().into_iter().map(|(n, _)| n).collect();
+    let known: Vec<String> = list().into_iter().map(|(n, _)| n).collect();
     bail!("no preset {name:?}; known: {}", known.join(", "))
 }
 
@@ -126,8 +118,9 @@ fn is_builtin(d: &Dir) -> bool {
     d.get_file(d.path().join("preset.toml")).is_some()
 }
 
-/// Every preset anina can find: (name, where).
-fn list_all() -> Vec<(String, String)> {
+/// Every preset anina can find, in lookup order: its name and where it was
+/// found (a folder, or `built in`). `resolve` and `Manifest::load` read one.
+pub fn list() -> Vec<(String, String)> {
     let mut seen: Vec<(String, String)> = Vec::new();
     for d in search_dirs() {
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
@@ -147,37 +140,6 @@ fn list_all() -> Vec<(String, String)> {
         }
     }
     seen
-}
-
-pub fn list() -> Result<()> {
-    for (name, from) in list_all() {
-        let dir = match resolve(&name) {
-            Ok(d) => d,
-            Err(e) => {
-                println!("{name:10} ({from}) unreadable: {e:#}");
-                continue;
-            }
-        };
-        let m = match Manifest::load(&dir) {
-            Ok(m) => m,
-            Err(e) => {
-                println!("{name:10} ({from}) invalid: {e:#}");
-                continue;
-            }
-        };
-        let missing: Vec<&str> =
-            m.requires.iter().filter(|r| crate::which(&r.program).is_none()).map(|r| r.program.as_str()).collect();
-        let parts: Vec<&str> = m.parts.iter().map(|p| p.name.as_str()).collect();
-        let status = if missing.is_empty() { "ready".to_string() } else { format!("needs {}", missing.join(", ")) };
-        println!("{name:10} {}", m.description);
-        println!(
-            "{:10} parts: {} · {status}{} · {from}",
-            "",
-            parts.join(", "),
-            if m.network { " · network" } else { "" }
-        );
-    }
-    Ok(())
 }
 
 /// The variables of a run: the built-in ones, then the preset's (the
@@ -237,9 +199,10 @@ pub struct StageArgs<'a> {
 }
 
 impl Stage {
-    /// Stage the preset `load` returned.
-    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs) -> Result<Stage> {
-        let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
+    /// Stage the preset `load` returned; its redaction counts in `scope`, and
+    /// what prepare does is said to `notice`.
+    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs, scope: &Scope, notice: &dyn Notice) -> Result<Stage> {
+        let say = |msg: String| notice.status(&msg);
 
         // what the machine must have
         let missing: Vec<String> = m
@@ -278,7 +241,7 @@ impl Stage {
 
         // redaction: the sandbox paths first (they may sit under the real home),
         // then the preset's and the command line's rules, then the defaults
-        let mut red = Redactor::default();
+        let mut red = scope.redactor().blank();
         for (p, w) in sb.redactions() {
             red.literal(&p, &w);
         }
@@ -289,7 +252,7 @@ impl Stage {
             let (p, w) = kv.rsplit_once('=').ok_or_else(|| anyhow!("--redact takes REGEX=REPLACEMENT"))?;
             red.push(p, w)?;
         }
-        red.rules.extend(Redactor::defaults().rules);
+        red.rules.extend(scope.redactor().rules.iter().cloned());
 
         // prepare: clones, builds, installs; cached by `creates`. Under strict
         // it writes the cache too, where clones and builds are kept (ADR-0006)
@@ -375,8 +338,8 @@ impl Stage {
     /// Put the sandbox back as `freeze` left it. Nothing to do before the
     /// first play; after one, only what it changed is put back (an install of
     /// hundreds of MB stays where it is) and read again, and the whole tree
-    /// is copied again only when that fails.
-    pub fn restore(&self) -> Result<()> {
+    /// is copied again only when that fails, which is said to `notice`.
+    pub fn restore(&self, notice: &dyn Notice) -> Result<()> {
         if self.fresh.replace(false) {
             return Ok(());
         }
@@ -386,7 +349,8 @@ impl Stage {
         match put_back(root, &self.pristine(), &changed) {
             Ok(()) => now.refresh(root, &changed),
             Err(e) => {
-                eprintln!("anina: putting back {} path(s) failed ({e}); copying the whole sandbox", changed.len());
+                let n = changed.len();
+                notice.status(&format!("putting back {n} path(s) failed ({e}); copying the whole sandbox"));
                 remove_tree(root).with_context(|| format!("emptying {}", root.display()))?;
                 copy_tree(&self.pristine(), root).with_context(|| format!("restoring {}", root.display()))?;
                 now = Snapshot::take(root);
@@ -457,101 +421,35 @@ impl Drop for Stage {
     }
 }
 
-/// Copy a directory tree: symlinks as symlinks, folders with their
-/// permissions. Sockets, FIFOs and devices are left out: they belong to the
-/// process that made them (an agent, a language server), not to the state.
-fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for e in std::fs::read_dir(from)? {
-        let e = e?;
-        copy_entry(&e.path(), &to.join(e.file_name()), e.file_type()?)?;
-    }
-    // after the entries: writing them moved the folder's mtime
-    let md = std::fs::metadata(from)?;
-    keep_times(&md, to);
-    std::fs::set_permissions(to, md.permissions())
+/// What `run` leaves: where it wrote, and the parts whose journey failed.
+#[derive(Debug)]
+pub struct Ran {
+    pub out: PathBuf,
+    pub failed: Vec<String>,
 }
 
-/// Give `to` the times in `md`. Build tools tell what to redo by mtime
-/// (cargo, make, tsc): a file put back with a new one is built again in
-/// every terminal. `fs::copy` keeps a file's times only where it clones
-/// (APFS), and never a folder's. Best effort: a file that can't be opened
-/// for reading keeps its new time.
-fn keep_times(md: &std::fs::Metadata, to: &Path) {
-    let (Ok(m), Ok(a)) = (md.modified(), md.accessed()) else { return };
-    if let Ok(f) = std::fs::File::open(to) {
-        let _ = f.set_times(std::fs::FileTimes::new().set_modified(m).set_accessed(a));
-    }
-}
-
-fn copy_entry(src: &Path, dst: &Path, t: std::fs::FileType) -> std::io::Result<()> {
-    use std::os::unix::fs::FileTypeExt;
-    if t.is_symlink() {
-        std::os::unix::fs::symlink(std::fs::read_link(src)?, dst)
-    } else if t.is_dir() {
-        copy_tree(src, dst)
-    } else if t.is_socket() || t.is_fifo() || t.is_block_device() || t.is_char_device() {
-        Ok(())
-    } else {
-        std::fs::copy(src, dst)?;
-        keep_times(&std::fs::metadata(src)?, dst);
-        Ok(())
-    }
-}
-
-/// Remove a tree, read-only folders included (Go's module cache is one):
-/// a folder without write permission cannot be emptied, so it gets it back.
-fn remove_tree(p: &Path) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(p) {
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            writable(p);
-            std::fs::remove_dir_all(p)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        r => r,
-    }
-}
-
-/// Give every folder under `dir` (itself included) back its owner's write
-/// and search bits.
-fn writable(dir: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let Ok(md) = std::fs::symlink_metadata(dir) else { return };
-    if !md.is_dir() {
-        return;
-    }
-    let mut perm = md.permissions();
-    perm.set_mode(perm.mode() | 0o700);
-    let _ = std::fs::set_permissions(dir, perm);
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        writable(&e.path());
-    }
-}
-
-/// Run a preset; returns the output directory.
-pub fn run(a: Args) -> Result<PathBuf> {
-    let (dir, m) = load(&a.preset)?;
+/// Run the preset `load` returned (`dir`, `m`). Each step of the way is said
+/// to `notice`; a part whose journey failed is in what it returns, not an
+/// error.
+pub fn run(dir: PathBuf, m: Manifest, a: &Request, scope: &Scope, notice: &dyn Notice) -> Result<Ran> {
     // picked before any work: a wrong --part fails here
     let parts: Vec<specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
-    anina_runner::redact::writes_to(&out);
+    scope.writes_to(&out);
     let started = Instant::now();
-    let stage = Stage::new(
-        dir,
-        m,
-        &StageArgs {
-            out: &out,
-            sandbox: a.sandbox.as_deref(),
-            vars: &a.vars,
-            redact: &a.redact,
-            keep: a.keep,
-            slot: None,
-        },
-    )?;
+    let args = StageArgs {
+        out: &out,
+        sandbox: a.sandbox.as_deref(),
+        vars: &a.vars,
+        redact: &a.redact,
+        keep: a.keep,
+        slot: None,
+    };
+    let stage = Stage::new(dir, m, &args, scope, notice)?;
     let (m, sb, red) = (&stage.manifest, &stage.sandbox, &stage.red);
-    let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
+    let say = |msg: String| notice.status(&msg);
 
     let before = Snapshot::take(&sb.root);
     let mut results = Vec::new();
@@ -595,7 +493,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
                 let cast_path = pdir.join(format!("{}.cast.json.gz", part.name));
                 rec.cast.save(&cast_path)?;
                 let svg = pdir.join(format!("{}.svg", part.name));
-                let svg_ok = match anina_render::svg::write_cast_svg(&rec.cast, None, &svg) {
+                let svg_ok = match anina_render::svg::write_cast_svg(&rec.cast, None, &svg, notice) {
                     Ok(()) => true,
                     Err(e) => {
                         say(format!("  no svg: {e:#}"));
@@ -632,122 +530,17 @@ pub fn run(a: Args) -> Result<PathBuf> {
         changes: changes.summary(),
     };
     std::fs::write(out.join("run.json"), red.to_json(&run)?)?;
-    print::write_index(&out, &run, a.embed)?;
-    if let Some(r) = anina_runner::redact::summary() {
+    print::write_index(&out, &run, a.embed, scope.redactor())?;
+    if let Some(r) = scope.redactor().summary() {
         say(format!("redacted {r}"));
     }
     say(format!("-> {}", anina_screen::lesson::shown(&out.join("index.html"))));
-    let failed: Vec<&str> = run.parts.iter().filter(|p| p.status == "failed").map(|p| p.name.as_str()).collect();
-    if !failed.is_empty() {
-        bail!("{} part(s) failed: {}", failed.len(), failed.join(", "));
-    }
-    Ok(out)
+    let failed = run.parts.iter().filter(|p| p.status == "failed").map(|p| p.name.clone()).collect();
+    Ok(Ran { out, failed })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt;
+mod tests;
 
-    /// Every entry under `root`: path, mode and mtime (links aside), a file's bytes.
-    fn listing(root: &Path) -> Vec<(PathBuf, u32, Option<std::time::SystemTime>, Vec<u8>)> {
-        let mut out = Vec::new();
-        let mut stack = vec![root.to_path_buf()];
-        while let Some(d) = stack.pop() {
-            for e in std::fs::read_dir(&d).unwrap().flatten() {
-                let (p, md) = (e.path(), std::fs::symlink_metadata(e.path()).unwrap());
-                let bytes = if md.is_file() { std::fs::read(&p).unwrap() } else { Vec::new() };
-                let mtime = (!md.is_symlink()).then(|| md.modified().unwrap());
-                out.push((p.strip_prefix(root).unwrap().to_path_buf(), md.permissions().mode(), mtime, bytes));
-                if md.is_dir() {
-                    stack.push(p);
-                }
-            }
-        }
-        out.sort();
-        out
-    }
-
-    #[test]
-    fn every_sandbox_has_a_saved_copy_of_its_own() {
-        // review of #70, 8
-        let sb = Path::new("/cache/anina/sandbox");
-        let (a, b) = (pristine_of(&sb.join("audit-tool.a")), pristine_of(&sb.join("audit-tool.b")));
-        assert_ne!(a, b);
-        assert_eq!(a, Path::new("/cache/anina/pristine/audit-tool.a"));
-        assert_ne!(pristine_of(&sb.join("x")), sb.join("x.pristine"));
-    }
-
-    #[test]
-    fn put_back_undoes_what_a_play_did_and_nothing_else() {
-        // review of #58, 3 and 4: chmod, an edit that kept size and mtime, a
-        // name that is not UTF-8, inside a read-only folder too
-        use std::os::unix::ffi::OsStrExt;
-        let dir = std::env::temp_dir().join(format!("anina-putback-{}", std::process::id()));
-        let _ = remove_tree(&dir);
-        let (root, saved) = (dir.join("root"), dir.join("saved"));
-        std::fs::create_dir_all(root.join("work/bin")).unwrap();
-        std::fs::create_dir_all(root.join("gocache/m")).unwrap();
-        std::fs::write(root.join("work/bin/run"), "#!/bin/sh").unwrap();
-        std::fs::write(root.join("work/conf"), "aaaa").unwrap();
-        std::fs::write(root.join("gocache/m/go.mod"), "module m").unwrap();
-        // a build in the next terminal compares these times
-        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_577_836_800);
-        for p in ["work/conf", "work/bin/run", "work/bin", "work"] {
-            let f = std::fs::File::open(root.join(p)).unwrap();
-            f.set_times(std::fs::FileTimes::new().set_modified(old).set_accessed(old)).unwrap();
-        }
-        std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o555)).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        copy_tree(&root, &saved).unwrap();
-        let base = Snapshot::take(&root);
-        let want = listing(&saved);
-        assert_eq!(want, listing(&root), "freeze keeps every time");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-
-        std::fs::set_permissions(root.join("work/bin/run"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::set_permissions(root.join("work/bin"), std::fs::Permissions::from_mode(0o700)).unwrap();
-        let mtime = std::fs::metadata(root.join("work/conf")).unwrap().modified().unwrap();
-        std::fs::write(root.join("work/conf"), "bbbb").unwrap();
-        std::fs::File::options().write(true).open(root.join("work/conf")).unwrap().set_modified(mtime).unwrap();
-        let _ = std::fs::write(root.join("work").join(std::ffi::OsStr::from_bytes(b"caf\xe9")), "x");
-        std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::write(root.join("gocache/m/extra"), "y").unwrap();
-        std::fs::set_permissions(root.join("gocache/m"), std::fs::Permissions::from_mode(0o555)).unwrap();
-
-        let mut now = Snapshot::take(&root);
-        let changed = base.differs(&now);
-        put_back(&root, &saved, &changed).unwrap();
-        assert_eq!(listing(&root), want);
-        now.refresh(&root, &changed);
-        assert!(now.differs(&Snapshot::take(&root)).is_empty());
-        remove_tree(&dir).unwrap();
-    }
-
-    #[test]
-    fn a_tree_with_sockets_fifos_and_read_only_folders_copies_and_goes() {
-        let dir = std::env::temp_dir().join(format!("anina-tree-{}", std::process::id()));
-        let _ = remove_tree(&dir);
-        let (from, to) = (dir.join("from"), dir.join("to"));
-        std::fs::create_dir_all(from.join("pkg/mod/x@v1")).unwrap();
-        std::fs::write(from.join("pkg/mod/x@v1/go.mod"), "module x").unwrap();
-        let _sock = std::os::unix::net::UnixListener::bind(from.join("agent.sock")).unwrap();
-        assert!(std::process::Command::new("mkfifo").arg(from.join("pipe")).status().unwrap().success());
-        std::os::unix::fs::symlink("pkg", from.join("link")).unwrap();
-        for d in ["pkg/mod/x@v1", "pkg/mod"] {
-            std::fs::set_permissions(from.join(d), std::fs::Permissions::from_mode(0o555)).unwrap();
-        }
-
-        copy_tree(&from, &to).unwrap();
-        assert_eq!(std::fs::read_to_string(to.join("pkg/mod/x@v1/go.mod")).unwrap(), "module x");
-        assert!(std::fs::symlink_metadata(to.join("link")).unwrap().file_type().is_symlink());
-        assert!(!to.join("agent.sock").exists() && !to.join("pipe").exists());
-        let mode = std::fs::metadata(to.join("pkg/mod")).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o555);
-
-        assert!(std::fs::remove_dir_all(&to).is_err());
-        remove_tree(&to).unwrap();
-        remove_tree(&dir).unwrap();
-        assert!(!dir.exists());
-    }
-}
+mod trees;
+use trees::*;

@@ -5,13 +5,15 @@
 //! text chunks anina writes into it (the screen it shows); a PNG without
 //! text is only pixels, and the summary counts it apart.
 
+use crate::ending::{Ending, ended};
 use anina_render::png::{PNG_SIGNATURE, png_text};
 use anina_runner::redact::Redactor;
+use anina_runner::redact::scope::Scope;
 use anyhow::{Result, bail};
 use regex::Regex;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
 #[derive(clap::Args, Debug)]
@@ -32,35 +34,22 @@ pub struct Finding {
     pub context: String,
 }
 
-pub fn run(a: Args) -> Result<()> {
+pub fn run(a: Args, scope: &Scope) -> Result<()> {
     let paths = if a.paths.is_empty() { vec![PathBuf::from("anina-out")] } else { a.paths };
-    check(&paths)
-}
-
-/// When the command started: `verify` checks what was written since.
-static STARTED: OnceLock<SystemTime> = OnceLock::new();
-
-/// Mark the start of the command, before it writes anything.
-pub fn mark_start() {
-    let _ = STARTED.set(SystemTime::now());
+    check_since(&paths, None, scope.redactor())
 }
 
 /// Check what a command just wrote, worked or failed: the files under the
-/// folders it noted (`redact::writes_to`) written since `mark_start`, not a
-/// note the user keeps there or what an earlier run left (`anina check`
-/// reads those).
-pub fn verify_written() -> Result<()> {
-    let outs: Vec<PathBuf> = anina_runner::redact::outputs().into_iter().filter(|d| d.exists()).collect();
+/// folders it noted (`Scope::writes_to`) written since `started` (taken
+/// before it wrote anything), not a note the user keeps there or what an
+/// earlier run left (`anina check` reads those).
+pub fn verify_written(scope: &Scope, started: SystemTime) -> Result<()> {
+    let outs: Vec<PathBuf> = scope.outputs().into_iter().filter(|d| d.exists()).collect();
     if outs.is_empty() {
         return Ok(());
     }
     // a little before the start: some file systems keep whole seconds
-    let since = STARTED.get().map(|t| *t - Duration::from_secs(2));
-    check_since(&outs, since)
-}
-
-fn check(paths: &[PathBuf]) -> Result<()> {
-    check_since(paths, None)
+    check_since(&outs, Some(started - Duration::from_secs(2)), scope.redactor())
 }
 
 /// Did the file change since `since`? By its status-change time (ctime),
@@ -76,8 +65,9 @@ fn written_since(f: &Path, since: Option<SystemTime>) -> bool {
     changed >= t
 }
 
-fn check_since(paths: &[PathBuf], since: Option<SystemTime>) -> Result<()> {
-    let red = Redactor::shared();
+/// Look through `paths` (the files written since `since`, when given) for
+/// what `red` would hide.
+fn check_since(paths: &[PathBuf], since: Option<SystemTime>, red: &Redactor) -> Result<()> {
     let (mut files, mut pngs, mut blind, mut skipped, mut found) = (0, 0, 0, 0, Vec::new());
     for p in paths {
         if !p.exists() {
@@ -122,7 +112,7 @@ fn check_since(paths: &[PathBuf], since: Option<SystemTime>) -> Result<()> {
     };
     let n = found.len();
     let s = |k: usize| if k == 1 { "" } else { "s" };
-    bail!("{n} thing{} to hide in {nfiles} file{} ({checked})", s(n), s(nfiles))
+    Err(ended(Ending::Hidden, format!("{n} thing{} to hide in {nfiles} file{} ({checked})", s(n), s(nfiles))))
 }
 
 /// What `text` shows that redaction would hide, a finding per match.
@@ -221,6 +211,21 @@ mod tests {
         assert!(!written_since(&old, since) && written_since(&copied, since));
         assert!(written_since(&old, None));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_reads_the_folders_its_own_scope_noted() {
+        let dir = std::env::temp_dir().join(format!("anina-verify-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let started = SystemTime::now();
+        std::fs::write(dir.join("a.txt"), "see /Users/alice/x\n").unwrap();
+        let (wrote, idle) = (Scope::of(red()), Scope::of(red()));
+        wrote.writes_to(&dir);
+        wrote.writes_to(&dir.join("never-made"));
+        assert!(verify_written(&idle, started).is_ok(), "a scope that noted no folder reads none");
+        let found = verify_written(&wrote, started).unwrap_err().to_string();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found, "1 thing to hide in 1 file (1 files checked)");
     }
 
     #[test]

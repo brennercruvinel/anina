@@ -4,6 +4,8 @@
 
 ### Added
 
+- Exit codes that say what kind of failure it was: 2 a command line not understood, 3 a journey that failed (a wait that did not hold, a part that did not play), 4 something to hide in what was written, 5 two runs that differ, 6 a score under the limit; 1 stays for any other failure. Every failure used to exit 1, so a pipeline could not tell a leak from a failed wait. What a command prints is the same. When a command fails and its output also has something to hide, the code is 4.
+- `anina audit --min-score N`: the command fails, with code 6, when any of the five scores is under N (0 to 100), after the report is written: `2 scores under 90: readability 0, compatibility 80`. A score that could not be measured does not count. With `--preset`, every part is audited before the limit is held. Without the flag an audit still never fails on a score.
 - Presets for glow, harlequin and helix, each recorded end to end in an empty sandbox. Their steps and waits come from `anina init`; harlequin and helix check their result inside the tape (`Wait "27,211"`, `Exec grep`).
 - `anina audit --preset NAME [--part P]`: a preset's parts played in every terminal of the matrix, each one starting from the sandbox as prepare left it. Between terminals only what a play changed is put back, permissions and edits that kept size and mtime included, with the times it had, so a build in the next terminal is not redone (ADR-0016).
 - `anina compare A B`: two runs compared with timing taken out (files, screens as text, PNG pixels, reports). From a report it leaves out the clock, the durations and the latencies (an exploration's `latency_ms` too), so two audits of the same program match. Measures taken over the screens a run happened to sample (colored and visible cells, contrast, the screenshot each terminal keeps, volatile cells) are shown side by side, not judged. Their verdicts still are: the readability score within 5 points, and whether each terminal kept to its colors (`colors_respected` in the report). Exits 1 on a difference.
@@ -53,3 +55,4 @@
 - `presets/` is `demo/`. The CI workflow is `gatecheck.yml`.
 - The folders that held only a `.gitkeep` are gone: seven under `demo/` (presets still to come) and `pkgs/` with its four. Every folder in `demo/` is a preset.
 - Releases are tagged `v{{version}}` for the whole workspace.
+- The library crates know nothing of the command line (ADR-0013): `anina-render` and `anina-record` take plain `Request` structs in the place of `clap` argument structs, say their status lines to a `Notice` the caller passes and print nothing, and `anina-runner` keeps the state of a run in a `Scope` passed down, not in statics. Commands, flags and output are the same.

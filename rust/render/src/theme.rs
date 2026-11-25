@@ -233,14 +233,18 @@ impl Theme {
 
     /// The theme for a cast: `flag` wins, then the cast's own; empty or
     /// "auto" derives one from the cast's colors. A cast theme that cannot be
-    /// found falls back to auto (with a warning); a flag must exist.
-    pub fn resolve(flag: Option<&str>, cast: &anina_screen::frames::Cast) -> Result<Theme> {
+    /// found falls back to auto (with a warning to `notice`); a flag must exist.
+    pub fn resolve(
+        flag: Option<&str>,
+        cast: &anina_screen::frames::Cast,
+        notice: &dyn anina_screen::notice::Notice,
+    ) -> Result<Theme> {
         match flag.filter(|f| !f.is_empty()) {
             Some("auto") => Ok(crate::brand::derive(cast)),
             Some(f) => Theme::load(f),
             None if cast.theme.is_empty() || cast.theme == "auto" => Ok(crate::brand::derive(cast)),
             None => Theme::load(&cast.theme).or_else(|e| {
-                eprintln!("anina: warning: {e}; using colors derived from the recording");
+                notice.warning(&format!("{e}; using colors derived from the recording"));
                 Ok(crate::brand::derive(cast))
             }),
         }

@@ -34,8 +34,8 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   printf '### fullcheck on %s\n\n| gate | result | time |\n| --- | --- | --- |\n' "$(uname -s)" >>"$GITHUB_STEP_SUMMARY"
 fi
 
-# the only warnings expected from packaging: the `leaks` and `walls` tests are
-# not in the package.
+# the only warnings expected from packaging: the `leaks`, `walls` and `codes`
+# tests are not in the package.
 # a target dir under a new path on every run. once packaged, the workspace's
 # crates are registry crates to cargo: it unpacks each one into
 # ~/.cargo/registry/src/<hash of the registry's path>/ and never again at the

@@ -217,6 +217,13 @@ pub fn all_scores(all: &[Outcome]) -> Vec<Score> {
     vec![stability(all), responsiveness(base), readability(base), compatibility(all), hygiene(base, all)]
 }
 
+/// The scores under `min`, as `category score`, in the report's order. A
+/// score that could not be measured is not under any limit: there is no
+/// number to hold.
+pub fn under(scores: &[Score], min: u8) -> Vec<String> {
+    scores.iter().filter_map(|s| s.score.filter(|v| *v < min).map(|v| format!("{} {v}", s.category))).collect()
+}
+
 fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
 }
@@ -469,5 +476,26 @@ mod tests {
         all.swap(0, 6);
         assert_eq!(all_scores(&all)[1].score, Some(0));
         assert_eq!(status_line(&all[0]), "ran");
+    }
+
+    #[test]
+    fn a_score_is_under_the_limit_only_when_it_was_measured_and_is_less() {
+        let score = |category, score| Score { category, score, rule: "", explain: Vec::new() };
+        let all = [
+            score("stability", Some(100)),
+            score("responsiveness", None),
+            score("readability", Some(71)),
+            score("compatibility", Some(90)),
+            score("hygiene", Some(89)),
+        ];
+        for (min, want) in [
+            (0, vec![]),
+            (71, vec![]),
+            (72, vec!["readability 71"]),
+            (90, vec!["readability 71", "hygiene 89"]),
+            (100, vec!["readability 71", "compatibility 90", "hygiene 89"]),
+        ] {
+            assert_eq!(under(&all, min), want, "min {min}");
+        }
     }
 }

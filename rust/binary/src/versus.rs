@@ -4,6 +4,7 @@
 //! files, the same screens as text, the same pixels, the same reports once
 //! their timings are taken out.
 
+use crate::ending::{Ending, ended};
 use anyhow::{Result, bail};
 use regex::Regex;
 use std::collections::BTreeSet;
@@ -119,7 +120,7 @@ pub fn run(a: Args) -> Result<()> {
         println!("{d}");
     }
     let n = t.diffs.len();
-    bail!("{n} difference{} ({summary})", if n == 1 { "" } else { "s" })
+    Err(ended(Ending::Differ, format!("{n} difference{} ({summary})", if n == 1 { "" } else { "s" })))
 }
 
 fn compare(f: &str, a: &[u8], b: &[u8], t: &mut Tally) {

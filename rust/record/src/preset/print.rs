@@ -3,6 +3,7 @@
 
 use super::specs::Part;
 use crate::Recording;
+use anina_runner::redact::Redactor;
 use serde::Serialize;
 use std::path::Path;
 
@@ -84,20 +85,17 @@ fn round(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
 }
 
-/// Redacted and HTML-escaped.
-fn esc(s: &str) -> String {
-    anina_runner::redact::Redactor::shared()
-        .text(s)
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+/// Redacted by `red` and HTML-escaped.
+fn esc(red: &Redactor, s: &str) -> String {
+    red.text(s).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 /// `index.html` next to `run.json`: per part, the demo and the screenshots
 /// (PNG when rendered, the text otherwise).
-/// Write `out/index.html`; with `embed`, the images go inside it.
-pub fn write_index(out: &Path, run: &Run, embed: bool) -> anyhow::Result<()> {
+/// Write `out/index.html`; with `embed`, the images go inside it. Every text
+/// it shows goes through `red` first.
+pub fn write_index(out: &Path, run: &Run, embed: bool, red: &Redactor) -> anyhow::Result<()> {
+    let esc = |s: &str| esc(red, s);
     let src = |rel: &str| anina_render::index::img_src(out, rel, embed);
     let mut body = String::new();
     for p in &run.parts {

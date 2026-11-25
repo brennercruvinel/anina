@@ -71,6 +71,7 @@ The split first made nine crates: `codecs`, `design`, `motion` and `recode` came
 ### Follow-up
 
 - A new crate enters `rust/` with its first line of code, and joins `[workspace.dependencies]` when another crate first depends on it.
+- 2026-11-25 (#122): the layers hold in what each crate knows, not only in what it depends on. `anina-render` and `anina-record` derived `clap::Args` and printed their own status lines: a library that parses flags and writes to the terminal knows the layer above it. The argument structs live in `rust/binary` now and fill plain `Request` structs; a line a library has to say goes to the `Notice` its caller passes (`anina_screen::notice`), and the binary prints it. What a run hides, what it hid and where it wrote were statics of `anina-runner`; they are a `Scope` the command creates and passes down, so no test reads what another wrote. `clap` is a dependency of the binary alone.
 
 ## References
 

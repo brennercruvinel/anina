@@ -3,6 +3,7 @@
 //! Mermaid map, screenshots, and a tape that replays the way to a screen.
 
 use super::hints::{self, Hint};
+use anina_runner::redact::Redactor;
 use anina_screen::{Mask, Screen};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -424,13 +425,13 @@ impl Graph {
     }
 
     /// A Mermaid flowchart plus a table of the screens.
-    pub fn map_md(&self) -> String {
+    pub fn map_md(&self, red: &Redactor) -> String {
         let mut m = String::new();
         let l = &self.launch;
         let cmd =
             std::iter::once(l.program.as_str()).chain(l.args.iter().map(|s| s.as_str())).collect::<Vec<_>>().join(" ");
         // the program's path may sit under the user's home
-        let cmd = anina_runner::redact::Redactor::shared().text(&cmd);
+        let cmd = red.text(&cmd);
         let _ = writeln!(m, "# Map of `{cmd}`\n");
         let exits = self.edges.iter().filter(|e| e.to.is_none()).count();
         let _ = writeln!(
@@ -505,12 +506,12 @@ impl Graph {
 
     /// graph.json, map.md and screens/ in `dir`. Returns how many PNGs were
     /// written (the renderer may be missing).
-    pub fn write(&self, dir: &Path) -> anyhow::Result<usize> {
+    pub fn write(&self, dir: &Path, red: &Redactor) -> anyhow::Result<usize> {
         let screens = dir.join("screens");
         std::fs::create_dir_all(&screens)?;
         // the screens were redacted as read; this catches the launch (cwd, env, args)
-        std::fs::write(dir.join("graph.json"), anina_runner::redact::Redactor::shared().to_json(self)?)?;
-        std::fs::write(dir.join("map.md"), self.map_md())?;
+        std::fs::write(dir.join("graph.json"), red.to_json(self)?)?;
+        std::fs::write(dir.join("map.md"), self.map_md(red))?;
         let mut pngs = 0;
         let mut png_ok = true;
         for s in &self.states {

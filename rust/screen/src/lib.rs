@@ -5,6 +5,7 @@
 pub mod escape;
 pub mod frames;
 pub mod lesson;
+pub mod notice;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
