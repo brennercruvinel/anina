@@ -75,9 +75,9 @@ The full reference sits at the top of [`rust/runner/src/script.rs`](rust/runner/
 
 ## Privacy
 
-Every command redacts what it reads before anything is written. Your home path becomes `~`, your user and host names become `user` and `host`, and git identity and token-shaped secrets become `you@example.com` and `••••`. That holds for every file it writes, screenshots and casts included. A replacement keeps the grid, so the columns after it stay put.
+anina redacts a screen before anything is made from it: a cast, a screenshot, an SVG. Your home path becomes `~`, your user and host names become `user` and `host`, your global git identity becomes `Your Name` and `you@example.com`, and token-shaped secrets become `••••`. A replacement keeps the grid, so the columns after it stay put.
 
-What anina can't guess goes in `anina.toml` next to where you run it, or in `~/.config/anina/config.toml`:
+Redaction matches patterns. What anina can't guess goes in `anina.toml` next to where you run it, or in `~/.config/anina/config.toml`:
 
 ```toml
 [redact]
@@ -85,9 +85,11 @@ replace = { 'ChatGPT\.app' = "Notes.app" }   # regex = example text
 mask = ['/Applications/[^/ ]+\.app']          # regex, shown as •••, cell for cell
 ```
 
-`anina run` gives every journey a fresh HOME and environment. `--sandbox strict` adds the OS sandbox, `sandbox-exec` on macOS and `bwrap` on Linux, and the program can't write outside it.
+`run`, `record`, `audit` and `explore` end with `anina check` on what they wrote, and it fails the command if something slipped. Each PNG carries the text of the screen it shows, so the check reads screenshots too. It reads text: a binary file is skipped and counted.
 
-`run`, `record`, `audit` and `explore` end with `anina check` on what they wrote, and it fails the command if something slipped. Each PNG carries the text of the screen it shows, so the check reads screenshots too.
+`anina run` gives the program a fresh HOME and environment. `--sandbox strict` adds the OS sandbox, `sandbox-exec` on macOS and `bwrap` on Linux, around everything the run starts: the program, a tape's `Exec`, a preset's `prepare`. A write outside the sandbox root fails, the system's temp and device folders aside, and the network is off unless the preset says `network = true`. When an `Exec` or a `prepare` is refused, the error says so. Reads stay open, and `Exec` and `prepare` keep your environment.
+
+A tape is code: `Exec` runs a shell line. Run a tape or a preset from someone else as you would run their script. [`SECURITY.md`](SECURITY.md) has every guarantee and every limit, by mode and by system, and how to report a problem.
 
 ## Install
 
