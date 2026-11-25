@@ -421,3 +421,25 @@ fn a_built_in_preset_is_not_extracted_through_a_link_in_the_cache() {
     assert!(!o.status.success(), "{said}");
     assert!(said.contains(FOUND[1]), "{said}");
 }
+
+/// `explore --before` resets what the program keeps between starts, and in a
+/// sandbox the program keeps it under the sandbox's HOME: that is the HOME
+/// the line gets, not the one of whoever runs anina.
+#[test]
+fn explore_runs_before_with_the_home_of_the_sandbox() {
+    let dir = scratch("before");
+    let mark = dir.join("home.txt");
+    let o = Command::new(env!("CARGO_BIN_EXE_anina"))
+        .args(["explore", "--sandbox", "env", "--max-depth", "0", "--quiet", "-o"])
+        .arg(dir.join("out"))
+        .args(["--before", "printf %s \"$HOME\" > \"$MARK\"", "--", "sh", "-c", "echo ready; sleep 5"])
+        .env("MARK", &mark)
+        .env("ANINA_CACHE", dir.join("cache"))
+        .env("ANINA_CONFIG", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", stderr(&o));
+    let home = std::fs::read_to_string(&mark).unwrap();
+    assert!(home.ends_with("/cache/sandbox/explore-sh/home"), "--before ran with HOME={home}");
+    assert_ne!(Some(home), std::env::var("HOME").ok());
+}

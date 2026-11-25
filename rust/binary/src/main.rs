@@ -122,8 +122,8 @@ struct RenderArgs {
     /// Longest a still screen stays, in seconds (default: the theme's)
     #[arg(long)]
     max_hold: Option<f64>,
-    /// Play everything X times faster
-    #[arg(long, default_value_t = 1.0)]
+    /// Play everything X times faster (above 0)
+    #[arg(long, default_value_t = 1.0, value_parser = above_zero)]
     speed: f64,
     /// Playback frame rate cap (default: the theme's)
     #[arg(long)]
@@ -140,6 +140,14 @@ struct RenderArgs {
     /// Also write the poster frame as a PNG
     #[arg(long)]
     poster: bool,
+}
+
+/// A speed: a number above zero. At zero an animation never ends.
+fn above_zero(s: &str) -> Result<f64, String> {
+    match s.parse::<f64>() {
+        Ok(v) if v > 0.0 && v.is_finite() => Ok(v),
+        _ => Err("a speed is a number above 0".into()),
+    }
 }
 
 #[derive(clap::Args, Debug)]

@@ -12,8 +12,15 @@ use vte::{Params, Parser, Perform};
 /// (tmux captures end that way) instead of scrolling the screen.
 pub fn parse(text: &str, cols: u16, rows: u16) -> Screen {
     let text = text.strip_suffix('\n').unwrap_or(text);
-    let mut grid =
-        Grid { s: Screen::blank(cols, rows), x: 0, y: 0, pen: Cell::default(), crlf: true, pending_wrap: false };
+    let mut grid = Grid {
+        s: Screen::blank(cols, rows),
+        x: 0,
+        y: 0,
+        pen: Cell::default(),
+        crlf: true,
+        pending_wrap: false,
+        graphics: false,
+    };
     let mut p = Parser::new();
     p.advance(&mut grid, text.as_bytes());
     grid.s.cursor.x = grid.x.min(cols.saturating_sub(1));
@@ -28,6 +35,8 @@ struct Grid {
     pen: Cell,
     crlf: bool,
     pending_wrap: bool,
+    /// Between SO and SI, or after `ESC ( 0`: letters stand for line drawing.
+    graphics: bool,
 }
 
 impl Grid {
@@ -134,8 +143,42 @@ fn extended(p: &[u16]) -> Option<Color> {
     }
 }
 
+/// The DEC special graphics set: what a letter stands for while line drawing
+/// is on. A program draws its boxes this way when the terminal has no UTF-8.
+fn line_drawing(c: char) -> char {
+    match c {
+        '`' => '◆',
+        'a' => '▒',
+        'f' => '°',
+        'g' => '±',
+        'j' => '┘',
+        'k' => '┐',
+        'l' => '┌',
+        'm' => '└',
+        'n' => '┼',
+        'o' => '⎺',
+        'p' => '⎻',
+        'q' => '─',
+        'r' => '⎼',
+        's' => '⎽',
+        't' => '├',
+        'u' => '┤',
+        'v' => '┴',
+        'w' => '┬',
+        'x' => '│',
+        'y' => '≤',
+        'z' => '≥',
+        '{' => 'π',
+        '|' => '≠',
+        '}' => '£',
+        '~' => '·',
+        other => other,
+    }
+}
+
 impl Perform for Grid {
     fn print(&mut self, c: char) {
+        let c = if self.graphics { line_drawing(c) } else { c };
         let w = c.width().unwrap_or(0) as u16;
         if w == 0 {
             // combining mark: attach to the previous cell
@@ -168,6 +211,11 @@ impl Perform for Grid {
     }
 
     fn execute(&mut self, byte: u8) {
+        // shift out and shift in: tmux's `capture-pane -e` wraps line drawing in them
+        if matches!(byte, 0x0e | 0x0f) {
+            self.graphics = byte == 0x0e;
+            return;
+        }
         self.pending_wrap = false;
         match byte {
             b'\n' => {
@@ -227,6 +275,26 @@ impl Perform for Grid {
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
+        // `ESC ( 0` picks the line drawing set, `ESC ( B` gives ASCII back
+        if intermediates == b"(" {
+            self.graphics = byte == b'0';
+        }
+    }
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn letters_between_shift_out_and_shift_in_are_line_drawing() {
+        // what `tmux capture-pane -e` gives for the top of a box, then plain text
+        let s = parse("\x0elqqk\x0f plain", 20, 2);
+        assert_eq!(s.text().lines().next(), Some("┌──┐ plain"));
+        // the same set picked with ESC ( 0 and given back with ESC ( B
+        let s = parse("\x1b(0mqj\x1b(Bmqj", 20, 2);
+        assert_eq!(s.text().lines().next(), Some("└─┘mqj"));
+    }
 }

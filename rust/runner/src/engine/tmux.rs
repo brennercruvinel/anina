@@ -72,6 +72,16 @@ fn tmux_key(k: &str) -> String {
     prefix + &base
 }
 
+/// Text as one `send-keys -l` argument. tmux ends a command at an argument
+/// that ends in `;`, so a typed `;` was dropped; `\;` is how it takes one.
+/// (`--` before it keeps a typed `-` from reading as a flag.)
+fn literal(data: &str) -> String {
+    match data.strip_suffix(';') {
+        Some(head) => format!("{head}\\;"),
+        None => data.to_string(),
+    }
+}
+
 impl Engine for Tmux {
     fn name(&self) -> &'static str {
         "tmux"
@@ -109,7 +119,7 @@ impl Engine for Tmux {
     }
 
     fn write(&mut self, data: &str) -> Result<()> {
-        self.tmux(&["send-keys", "-t", SESSION, "-l", data]).map(|_| ())
+        self.tmux(&["send-keys", "-t", SESSION, "-l", "--", &literal(data)]).map(|_| ())
     }
 
     fn key(&mut self, key: &str) -> Result<()> {
@@ -221,6 +231,10 @@ mod tests {
 
     /// Whether tmux is here to be tried. Without it the test passes on a
     /// developer's machine, untried; in CI it fails, where it is installed.
+    /// One tmux server per process and one session name in it: the tests that
+    /// start a program take turns.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn tmux_here() -> bool {
         if Command::new("tmux").arg("-V").output().is_ok_and(|o| o.status.success()) {
             return true;
@@ -229,11 +243,38 @@ mod tests {
         false
     }
 
+    /// tmux reads `;` at the end of an argument as the end of its command, and
+    /// `-` at its start as a flag: both are text when a tape types them.
+    #[test]
+    fn a_semicolon_and_a_dash_are_typed_as_written() {
+        assert_eq!(
+            (literal("a;"), literal(";"), literal("a;b"), literal("-l")),
+            ("a\\;".into(), "\\;".into(), "a;b".into(), "-l".into())
+        );
+        if !tmux_here() {
+            return;
+        }
+        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let mut spec = Spec::new("/bin/sh", vec!["-c".into(), "read l; echo \"got[$l]\"; sleep 2".into()]);
+        (spec.cols, spec.rows) = (40, 5);
+        let mut e = Tmux::default();
+        e.spawn(&spec).unwrap();
+        for typed in [";", "-a", "b;", " -l"] {
+            e.write(typed).unwrap();
+        }
+        e.key("enter").unwrap();
+        let (seen, s) =
+            wait_for(&mut e, &Pattern::Text("got[;-ab; -l]".into()), false, Duration::from_secs(10)).unwrap();
+        e.close().unwrap();
+        assert!(seen, "the screen was:\n{}", s.text());
+    }
+
     #[test]
     fn a_program_in_tmux_is_typed_to_resized_and_seen_to_exit() {
         if !tmux_here() {
             return;
         }
+        let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let script = "printf 'name? '; read n; echo \"hello $n\"; read x; stty size; read y; exit 3";
         let mut spec = Spec::new("/bin/sh", vec!["-c".into(), script.into()]);
         (spec.cols, spec.rows) = (40, 5);

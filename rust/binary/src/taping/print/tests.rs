@@ -120,6 +120,7 @@ fn session(inputs: Vec<(f64, &str, Screen)>, last: Screen) -> Session {
             .collect(),
         resizes: Vec::new(),
         end: 3.0,
+        exited: false,
         last,
         last_quiet: Mask::new(cols, rows),
         volatile: Mask::new(cols, rows),
@@ -249,4 +250,16 @@ fn a_padded_row_is_not_a_whole_row_wait() {
     let b = screen(&["close      write      quit", "", ""]);
     let c = candidates(&a, &b, &Mask::new(60, 3), &Seen::default());
     assert!(c.iter().all(|(_, w)| !w.starts_with("'/^")), "{c:?}");
+}
+
+#[test]
+fn no_wait_after_the_key_that_ended_the_program() {
+    // ranger: `q` quits, and what shows after it is what ranger left as it went
+    let list = screen(&["~/Desktop", "notes.md", "todo.md"]);
+    let left = screen(&["~/Desktop", "notes.md", "return exit_code"]);
+    let mut s = session(vec![(1.0, "q", list.clone())], left.clone());
+    // stopped by hand with the program still there: the wait is what replays the pause
+    assert!(write(&s).trim_end().ends_with("Type 'q'\nWait 'return exit_code'"), "{}", write(&s));
+    s.exited = true;
+    assert!(write(&s).trim_end().ends_with("Type 'q'"), "{}", write(&s));
 }

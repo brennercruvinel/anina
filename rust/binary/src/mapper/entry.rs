@@ -46,7 +46,8 @@ pub struct Args {
     #[arg(long)]
     pub allow_risky: bool,
     /// A shell command run before every start of the program (reset the
-    /// state it keeps between runs, e.g. `rm -rf $HOME/.cache/app`)
+    /// state it keeps between runs, e.g. `rm -rf $HOME/.cache/app`). In a
+    /// sandbox, HOME is the sandbox's
     #[arg(long, value_name = "CMD")]
     pub before: Option<String>,
     /// Write path.tape: the shortest way to the first screen showing TEXT
@@ -116,6 +117,11 @@ pub fn run(a: Args, scope: &Scope) -> Result<()> {
     spec.clean_env = clean_env;
     let engine_name = a.engine.clone();
     let before = a.before.clone();
+    // `--before` resets what the program keeps between starts, and in a
+    // sandbox the program keeps it there: the line gets the sandbox's HOME
+    // and variables, and starts where the program does
+    let in_sandbox: Option<(std::collections::HashMap<String, String>, PathBuf)> =
+        sb.as_ref().map(|s| (s.env().into_iter().collect(), s.work.clone()));
     // every screen is redacted as it is read: titles, the graph, the map and
     // the tape to a screen all see what may be written
     let mut red = scope.redactor().blank();
@@ -125,7 +131,11 @@ pub fn run(a: Args, scope: &Scope) -> Result<()> {
     red.rules.extend(scope.redactor().rules.iter().cloned());
     let make: Factory = Box::new(move || {
         if let Some(cmd) = &before {
-            wrap.sh(&[], cmd).run("--before")?;
+            let line = wrap.sh(&[], cmd);
+            match &in_sandbox {
+                Some((vars, work)) => line.envs(vars).cwd(work).run("--before")?,
+                None => line.run("--before")?,
+            }
         }
         let mut e: Box<dyn Engine> = Box::new(Redacted::new(engine::by_name(&engine_name)?, red.clone()));
         e.spawn(&spec)?;

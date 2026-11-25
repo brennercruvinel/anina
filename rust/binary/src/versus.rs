@@ -3,6 +3,10 @@
 //! sampling move. What must match is what the run shows and leaves: the same
 //! files, the same screens as text, the same pixels, the same reports once
 //! their timings are taken out.
+//!
+//! Two more things are not the run's: a clock or a date the program drew
+//! (two runs a minute apart differ by it; it is named and not judged), and a
+//! folder anina did not write, which is refused instead of walked.
 
 use crate::ending::{Ending, ended};
 use anyhow::{Result, bail};
@@ -74,6 +78,18 @@ fn sampled_png(f: &str) -> bool {
 /// `[4.7s]` in a transcript: when a step happened.
 static STAMP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d+(?:\.\d+)?s\]").unwrap());
 
+/// A time of day or a date as a program draws it: `15:38`, `15:38:02`,
+/// `2026-11-12`. The first group is what stands before it, never a digit: in
+/// a screen kept with its colors, the `m` that ends an escape sequence.
+static CLOCK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(^|[^\d:-])(\d{1,2}:\d{2}(?::\d{2})?|\d{4}-\d{2}-\d{2})\b").unwrap());
+
+/// The colors of the window around the terminal, in an SVG anina drew: the
+/// stops of its three gradients. They are the theme's, not the clock's.
+static WINDOW: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?s)<linearGradient id="(?:bg|bar|brand)".*?</linearGradient>"#).unwrap());
+static STOP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"stop-color="([^"]+)""#).unwrap());
+
 #[derive(Default)]
 struct Tally {
     texts: usize,
@@ -94,6 +110,17 @@ pub fn run(a: Args) -> Result<()> {
         }
     }
     let (fa, fb) = (files(&a.a), files(&a.b));
+    for (d, f) in [(&a.a, &fa), (&a.b, &fb)] {
+        if !f.iter().any(|f| written_by_anina(f)) {
+            return Err(ended(
+                Ending::Usage,
+                format!(
+                    "{} is not a folder anina wrote: it holds no run.json, report.json, graph.json or cast",
+                    d.display()
+                ),
+            ));
+        }
+    }
     let mut t = Tally::default();
     for f in fa.difference(&fb) {
         t.diffs.push(format!("only in {}: {f}", a.a.display()));
@@ -124,15 +151,30 @@ pub fn run(a: Args) -> Result<()> {
 }
 
 fn compare(f: &str, a: &[u8], b: &[u8], t: &mut Tally) {
-    let same = if f.ends_with(".txt") {
+    let same = if f.ends_with(".txt") || f.ends_with(".ansi") {
         t.texts += 1;
-        untimed(a) == untimed(b)
+        let (x, y) = (untimed(a), untimed(b));
+        x == y || only_a_clock(f, &x, &y, &mut t.notes)
     } else if sampled_png(f) {
         t.sampled += 1;
         true
     } else if f.ends_with(".png") {
         t.pngs += 1;
-        pixels(a) == pixels(b)
+        // the pixels, or else the screens they show, when those differ by a clock alone
+        pixels(a) == pixels(b) || {
+            let (x, y) = (anina_render::png::png_text(a), anina_render::png::png_text(b));
+            x != y && only_a_clock(f, &x, &y, &mut t.notes)
+        }
+    } else if f.ends_with(".svg") {
+        t.timed += 1;
+        let (x, y) = (window(a), window(b));
+        // an SVG kept empty (a reference run) has no window to compare
+        if x.is_empty() || y.is_empty() || x == y {
+            true
+        } else {
+            t.diffs.push(format!("differs: {f} (window colors {} against {})", x.join(" "), y.join(" ")));
+            return;
+        }
     } else if f.ends_with(".json") && !f.ends_with(".cast.json") {
         t.reports += 1;
         match (serde_json::from_slice(a), serde_json::from_slice(b)) {
@@ -145,7 +187,7 @@ fn compare(f: &str, a: &[u8], b: &[u8], t: &mut Tally) {
             }
             _ => a == b,
         }
-    } else if f.ends_with(".svg") || f.ends_with(".gz") || f.ends_with(".html") || f.ends_with(".cast") {
+    } else if f.ends_with(".gz") || f.ends_with(".html") || f.ends_with(".cast") {
         t.timed += 1;
         true
     } else {
@@ -177,6 +219,37 @@ fn files(dir: &Path) -> BTreeSet<String> {
         }
     }
     out
+}
+
+/// Whether `file` is one only anina writes: a run's or an audit's report, an
+/// exploration's graph, a cast.
+fn written_by_anina(file: &str) -> bool {
+    let name = file.rsplit('/').next().unwrap_or(file);
+    matches!(name, "run.json" | "report.json" | "graph.json")
+        || [".cast.json", ".cast.json.gz", ".cast"].iter().any(|end| name.ends_with(end))
+}
+
+/// Whether two texts that differ are the same once every time of day and
+/// date is taken out. If so the clocks are named in a note: a program drew
+/// them, and two runs a minute apart are still the same run.
+fn only_a_clock(f: &str, a: &str, b: &str, notes: &mut Vec<String>) -> bool {
+    if CLOCK.replace_all(a, "${1}•") != CLOCK.replace_all(b, "${1}•") {
+        return false;
+    }
+    let drawn = |s: &str| CLOCK.captures_iter(s).map(|c| c[2].to_string()).collect::<Vec<_>>();
+    let pair = drawn(a).into_iter().zip(drawn(b)).find(|(x, y)| x != y);
+    let (x, y) = pair.unwrap_or_default();
+    notes.push(format!("{f}: differs by a clock or a date the program drew ({x} against {y}), not compared"));
+    true
+}
+
+/// The window colors of an SVG anina drew, in order; none for another file.
+fn window(svg: &[u8]) -> Vec<String> {
+    let svg = String::from_utf8_lossy(svg);
+    WINDOW
+        .find_iter(&svg)
+        .flat_map(|g| STOP.captures_iter(g.as_str()).map(|c| c[1].to_string()).collect::<Vec<_>>())
+        .collect()
 }
 
 fn untimed(b: &[u8]) -> String {
@@ -405,5 +478,51 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(pixels(&a), pixels(&b));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn a_clock_the_program_drew_is_named_and_not_judged() {
+        let mut t = Tally::default();
+        // tig's first row, two runs half an hour apart
+        compare(
+            "failed.txt",
+            b"2026-11-12 15:38 Not Committed Yet\nmain",
+            b"2026-11-12 16:05 Not Committed Yet\nmain",
+            &mut t,
+        );
+        compare("failed.ansi", b"\x1b[1m15:38\x1b[0m x", b"\x1b[1m16:05\x1b[0m x", &mut t);
+        assert!(t.diffs.is_empty(), "{:?}", t.diffs);
+        assert_eq!(t.notes.len(), 2);
+        assert!(t.notes[0].contains("(15:38 against 16:05)"), "{}", t.notes[0]);
+        // anything else that differs is still a difference
+        compare("screen.txt", b"15:38 main", b"16:05 next", &mut t);
+        assert_eq!(t.diffs, ["differs: screen.txt"]);
+    }
+
+    #[test]
+    fn two_themes_are_a_difference_and_an_empty_svg_is_not() {
+        let svg = |bg: &str| {
+            format!(
+                r##"<svg><defs><linearGradient id="bg"><stop offset="0" stop-color="{bg}"/></linearGradient></defs><text>[1.2s]</text></svg>"##
+            )
+        };
+        let mut t = Tally::default();
+        compare("tig.svg", svg("#11344A").as_bytes(), svg("#21333d").as_bytes(), &mut t);
+        assert_eq!(t.diffs, ["differs: tig.svg (window colors #11344A against #21333d)"]);
+        let mut t = Tally::default();
+        compare("tig.svg", svg("#11344A").as_bytes(), svg("#11344A").replace("1.2s", "9.9s").as_bytes(), &mut t);
+        // a reference run keeps its SVG empty
+        compare("tig.svg", b"", svg("#21333d").as_bytes(), &mut t);
+        assert!(t.diffs.is_empty(), "{:?}", t.diffs);
+        assert_eq!(t.timed, 2);
+    }
+
+    #[test]
+    fn only_what_anina_writes_marks_a_folder_as_its_own() {
+        for f in ["run.json", "report.json", "basics/graph.json", "out/tig.cast.json.gz", "x.cast"] {
+            assert!(written_by_anina(f), "{f}");
+        }
+        for f in ["package.json", "screen.txt", "zsh/5.9/functions/run-help", "notes/report.json.bak"] {
+            assert!(!written_by_anina(f), "{f}");
+        }
     }
 }

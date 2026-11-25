@@ -79,6 +79,10 @@ pub fn run(a: Args, scope: &Scope) -> Result<()> {
     if let Some(p) = &a.preset {
         return run_preset(&a, p, scope);
     }
+    // said here: clap lets them through next to a tape or a command
+    if !a.part.is_empty() || a.sandbox.is_some() {
+        return Err(ended(Ending::Usage, "--part and --sandbox go with --preset: a tape or a command has neither"));
+    }
     let (name, target) = match (&a.tape, a.command.first()) {
         (Some(t), _) => {
             (t.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned()), t.display().to_string())
@@ -110,8 +114,11 @@ pub fn run(a: Args, scope: &Scope) -> Result<()> {
             tape
         }
     };
-    let low = audit(&a, &tape, &target, &out, None, scope)?;
-    held(a.min_score, &low)
+    let done = audit(&a, &tape, &target, &out, None, scope)?;
+    match done.broke {
+        Some(why) => Err(ended(Ending::Journey, why)),
+        None => held(a.min_score, &done.low),
+    }
 }
 
 /// Audit every part of a preset (or `--part`), one report per part.
@@ -140,7 +147,7 @@ fn run_preset(a: &Args, preset: &str, scope: &Scope) -> Result<()> {
         &Stderr::Preset(name.clone()),
     )?;
     stage.freeze()?;
-    let mut low = Vec::new();
+    let (mut low, mut broke) = (Vec::new(), Vec::new());
     for part in &parts {
         let gaps = stage.gaps(part);
         if !gaps.is_empty() {
@@ -151,11 +158,23 @@ fn run_preset(a: &Args, preset: &str, scope: &Scope) -> Result<()> {
         std::fs::create_dir_all(&pout)?;
         let tape = stage.tape(part, &pout)?;
         eprintln!("anina [{name}] auditing part {} · {}", part.name, Stage::title(part));
-        let under = audit(a, &tape, &format!("{name} · {}", part.name), &pout, Some(&stage), scope)?;
-        // every part is audited before the limit is held: one report per part
-        low.extend(under.into_iter().map(|s| format!("{} {s}", part.name)));
+        let done = audit(a, &tape, &format!("{name} · {}", part.name), &pout, Some(&stage), scope)?;
+        // every part is audited before the command ends: one report per part
+        low.extend(done.low.into_iter().map(|s| format!("{} {s}", part.name)));
+        broke.extend(done.broke.map(|why| format!("{}: {why}", part.name)));
+    }
+    if !broke.is_empty() {
+        return Err(ended(Ending::Journey, broke.join("; ")));
     }
     held(a.min_score, &low)
+}
+
+/// What one audit leaves for the command's end, its report aside.
+struct Audited {
+    /// The scores under `--min-score`, as `category score`: none without it.
+    low: Vec<String>,
+    /// The journey did not hold in the baseline terminal: nothing to score.
+    broke: Option<String>,
 }
 
 /// The command's end under `--min-score`: `low` holds the scores under it.
@@ -171,12 +190,12 @@ fn held(min: Option<u8>, low: &[String]) -> Result<()> {
 
 /// Play `tape` in every terminal of the matrix, score it, write the report.
 /// With a stage, each terminal runs in the preset's sandbox, restored first.
-/// Returns the scores under `--min-score`, as `category score`: none without it.
-fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>, scope: &Scope) -> Result<Vec<String>> {
+fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>, scope: &Scope) -> Result<Audited> {
     let red = scope.redactor();
     let sizes = cases::parse_sizes(&a.sizes)?;
     let variants = cases::variants(&sizes, a.quick, a.full);
     let mut outcomes = Vec::new();
+    let mut broke = None;
     for (i, v) in variants.iter().enumerate() {
         let dir = out.join("terminals").join(&v.name);
         let _ = std::fs::remove_dir_all(&dir);
@@ -215,9 +234,19 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>,
         );
         let base_failed = v.baseline && !matches!(o.status, meter::Status::Ok);
         outcomes.push(o);
-        if base_failed && !a.keep_going {
-            eprintln!("anina: the journey fails in the baseline terminal; stopping (--keep-going runs the rest)");
-            break;
+        if base_failed {
+            let left = variants.len() - i - 1;
+            broke = Some(if a.keep_going {
+                "the journey fails in the baseline terminal".to_string()
+            } else {
+                format!(
+                    "the journey fails in the baseline terminal: {left} of {} terminals were not run (--keep-going runs them)",
+                    variants.len()
+                )
+            });
+            if !a.keep_going {
+                break;
+            }
         }
     }
 
@@ -238,7 +267,7 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>,
         eprintln!("\nanina: redacted {r}");
     }
     eprintln!("\nanina: report -> {}", anina_screen::lesson::shown(&out.join("report.html")));
-    Ok(a.min_score.map_or_else(Vec::new, |min| score::under(&scores, min)))
+    Ok(Audited { low: a.min_score.map_or_else(Vec::new, |min| score::under(&scores, min)), broke })
 }
 
 /// How a bare command behaves on its own: whether it exits by itself, and

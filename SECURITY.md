@@ -29,11 +29,13 @@ Code: `rust/runner/src/redact.rs`, `rust/binary/src/checks.rs`.
 
 There are three modes. `anina run` and `anina audit --preset` use the preset's, `env` when it names none, and `--sandbox` wins over it. `anina explore` uses `off` unless `--sandbox` says otherwise. `record`, `init` and `audit` without `--preset` have no sandbox: they run as `off`.
 
-| mode | the program | `Exec`, `prepare`, `explore --before` |
+| mode | the program | `Exec`, `prepare` |
 | --- | --- | --- |
 | `off` | your environment | your environment |
 | `env` | a HOME, temp and XDG folders of its own under the sandbox root, an environment built from scratch, an empty working folder | your environment |
 | `strict` | `env`, inside the OS sandbox | your environment, inside the OS sandbox |
+
+`explore --before` is a shell line too, with one difference: in `env` and `strict` it gets the sandbox's HOME, temp and XDG folders over your environment, and starts in the sandbox's working folder. It is there to reset what the program keeps between starts, and in a sandbox the program keeps it there: `rm -rf $HOME/.cache/app` reaches the sandbox's home, not yours. The rest of your environment stays, tokens in variables included.
 
 `env` gives a program no reason to touch your files. It does not stop one: nothing refuses a write. The environment built from scratch still carries your `PATH` after the sandbox's own, so the program finds the tools your machine has.
 

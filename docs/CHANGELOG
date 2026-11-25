@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+What the black-box audit of every command found (#129).
+
+### Fixed
+
+- The tmux engine types `;`: tmux read it as the end of its own command, so `echo a; echo b` ran as `echo a echo b`. It also draws box lines as lines, where it showed the letters of the terminal's line drawing set (`lqqk`).
+- `anina audit` ends with code 3 when the journey fails in the baseline terminal, and says how many terminals it did not run. It used to exit 0 with one terminal of seven.
+- `anina explore --before` runs with the sandbox's HOME and variables under `--sandbox env` and `strict`, and starts in the sandbox's working folder. With the real HOME, the help's own example removed a folder of the real home.
+- `anina explore` counts a key that acts on another process as risky (Nice, renice, priority, signal, as Kill already was) and skips it unless `--allow-risky`.
+- `anina explore` ends with code 3 when the program ends as it starts, with what the program drew. It used to report a complete map of it.
+- `path.tape` from `explore --to` names no folder of the machine that wrote it: the home path is `${HOME}` and the inherited PATH `${PATH}`. With both written out, explore failed its own check.
+- A `Wait` holds on text a `--redact` rule rewrote: the rule changes what is written, not whether the tape plays.
+- `anina init` writes no wait after the key that ended the program.
+- `anina render --poster`, the SVG's still and the transcript show the last frame with something on it when the tape marks none. They showed the empty screen before the program drew.
+- `anina compare` does not call two runs different for a clock or a date the program drew: it names it in a note. It tells two themes apart by the window colors of the SVGs. A folder anina did not write is refused with code 2 instead of walked.
+
+### Changed
+
+- `anina render --speed` and a tape's `Speed` take a number above 0. Zero wrote an animation of five minutes.
+- `anina audit --part` and `--sandbox` without `--preset` are refused with code 2. They were accepted and dropped.
+- `anina init` says when the program saved its settings during the session, in what it prints and in the tape's first line: a replay starts from what was saved.
+- `anina run --sandbox off` on a preset written for a sandbox says that it now runs in your own HOME.
+- `anina record` says when the program drew nothing and names `--engine tmux`. lnav is such a program: it asks the terminal for its 256 colors at once, and the in-process terminal does not hand the answers back. Under tmux it draws.
+
 ## 0.1.0
 
 ### Added

@@ -217,6 +217,15 @@ impl Stage {
 
         // the sandbox, empty unless keep
         let mode: Mode = a.sandbox.or(m.sandbox.as_deref()).unwrap_or("env").parse()?;
+        let written_for: Mode = m.sandbox.as_deref().unwrap_or("env").parse()?;
+        if mode == Mode::Off && written_for != Mode::Off {
+            notice.warning(&format!(
+                "no sandbox: {} was written for `{}`, and now runs in your own HOME and environment. \
+                 What it writes there stays, and a step that waits for a sandbox path will not hold",
+                m.name,
+                m.sandbox.as_deref().unwrap_or("env")
+            ));
+        }
         // in the cache, not in the output: installs weigh hundreds of MB
         let root = crate::cordon::place(&cache_dir(), a.slot.unwrap_or(&m.name))?;
         if !a.keep && root.exists() {

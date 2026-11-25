@@ -226,12 +226,18 @@ impl Rec {
         self.need()?;
         let secs = timeout.unwrap_or(self.cfg.wait_timeout);
         let end = Instant::now() + Duration::from_secs_f64(secs);
+        // the screen is read redacted: a rule that rewrites the text the tape
+        // waits for (`--redact`) changes what is written, not whether it plays
+        let also = match (pat, &self.opts.redactor) {
+            (Pattern::Text(t), Some(r)) => Some(r.quiet(t)).filter(|as_shown| as_shown != t).map(Pattern::Text),
+            _ => None,
+        };
         loop {
             let (s, sampled) = match self.tick(false)? {
                 Some(s) => (s, true),
                 None => (self.read()?, false),
             };
-            if pat.matches(&s) != gone {
+            if (pat.matches(&s) || also.as_ref().is_some_and(|p| p.matches(&s))) != gone {
                 // read between two samples, the screen the wait held on is a
                 // frame of this step all the same: the next step may change
                 // the caption, and what a step ends with must not follow the
@@ -577,6 +583,15 @@ pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<Played> {
     for w in rec.warnings.iter().skip(tape.warnings.len()) {
         notice.warning(w);
     }
+    if rec.first_screen.is_none() {
+        // lnav does this: it asks the terminal for its 256 colors at once and waits
+        notice.warning(if r.engine == "tmux" {
+            "the program drew nothing"
+        } else {
+            "the program drew nothing. If it draws in your own terminal, it may be waiting for answers \
+             the in-process terminal could not hand back: try --engine tmux"
+        });
+    }
     let cast_path = out.join(format!("{name}.cast.json.gz"));
     rec.cast.save(&cast_path)?;
     notice.status(&format!(
@@ -604,21 +619,4 @@ pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<Played> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// One sample a second, and the program draws between two of them: the
-    /// screen a `Wait` holds on is read off the sampling clock. It is a frame
-    /// of the step that waited all the same, so what a step ends with (the
-    /// transcript shows it) does not follow where the clock stood.
-    #[test]
-    fn the_screen_a_wait_held_on_is_a_frame_of_its_step() {
-        let src = "Set FPS 1\nSpawn sh -c 'sleep 0.3; printf ready; sleep 2'\nWait \"ready\"\nCaption \"after\"\n";
-        let tape = Tape::parse_str(src, "wait.tape", &HashMap::new()).unwrap();
-        let out_dir = std::env::temp_dir().join(format!("anina-wait-{}", std::process::id()));
-        let cast =
-            record(&tape, Config::default(), Options { out_dir, quiet: true, ..Options::default() }).unwrap().cast;
-        let waited = cast.frames.iter().filter(|f| f.caption.is_empty()).any(|f| cast.screens[f.s].contains("ready"));
-        assert!(waited, "no frame of the step that waited shows what its wait held on");
-    }
-}
+mod tests;
