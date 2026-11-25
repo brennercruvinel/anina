@@ -108,12 +108,25 @@ A tape is code: `Exec` runs a shell line. Run a tape or a preset from someone el
 
 ## Install
 
+A binary, no compiler needed. Each [release](https://github.com/brennercruvinel/anina/releases) has one archive per system: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`.
+
+```sh
+base=https://github.com/brennercruvinel/anina/releases/download/v0.1.0
+file=anina-v0.1.0-aarch64-apple-darwin.tar.gz
+curl -LO "$base/$file" -O "$base/$file.sha256"
+shasum -a 256 -c "$file.sha256"                                # sha256sum -c on Linux
+gh attestation verify "$file" --repo brennercruvinel/anina     # built by this repository's workflow
+tar -xzf "$file" && ./anina-v0.1.0-aarch64-apple-darwin/anina doctor
+```
+
+Or from source, with Rust 1.90+:
+
 ```sh
 cargo install --git https://github.com/brennercruvinel/anina anina
 anina doctor
 ```
 
-Rust 1.90+, macOS or Linux. tmux is optional, a second engine you can attach to and watch.
+macOS or Linux. tmux is optional, a second engine you can attach to and watch.
 
 ## How it's built
 
@@ -121,7 +134,7 @@ anina waits on what the screen shows, never on the clock. Cells that change by t
 
 The SVG is one looping timeline with an embedded subset of JetBrains Mono, so it looks the same everywhere, `<img>` on GitHub included. PNGs come from the same SVG through resvg, no browser.
 
-The code is a workspace of five crates in [`rust/`](rust), layered from the screen up to the binary: `screen`, then `runner` and `render`, then `record`, then `binary`. The reasons behind each choice are in [`docs/adr/`](docs/adr).
+The code is a workspace of five crates in [`rust/`](rust), layered from the screen up to the binary: `screen`, then `runner` and `render`, then `record`, then `binary`. [`ARCHITECTURE.md`](ARCHITECTURE.md) shows how the crates fit and the path a run takes; the reasons behind each choice are in [`docs/adr/`](docs/adr), and how a change gets in is in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 anina checks its own output with its own command. `tool/tasks/selfcheck.sh` plays the `shell` preset and runs `anina compare` against the run kept in [`tool/tests/shell/`](tool/tests/shell) for the system it is on, macOS or Linux. [`tool/tasks/fullcheck.sh`](tool/tasks/fullcheck.sh) runs it with the other gates, and CI runs that same script. A pull request that changes what anina records on purpose runs `tool/tasks/selfcheck.sh --update` on both systems and brings the two references with it.
 
