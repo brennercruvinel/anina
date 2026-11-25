@@ -2,6 +2,7 @@ a shell, recorded by anina
 ==========================
 
 [0.0s]
+    $
 
 ## 1 · where the sandbox puts you
 
@@ -13,7 +14,7 @@ a shell, recorded by anina
 
 ## 2 · files
 
-[5.4s]
+[5.2s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -24,7 +25,7 @@ a shell, recorded by anina
 
 ## 3 · colors
 
-[13.6s]
+[12.9s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -38,7 +39,7 @@ a shell, recorded by anina
 
 ## 4 · a clean environment
 
-[18.2s]
+[17.5s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -53,7 +54,7 @@ a shell, recorded by anina
     L TERM TMPDIR USER XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME _
     $
 
-[20.1s]
+[19.0s]
     $ pwd; echo ~
     /sandbox/work
     ~

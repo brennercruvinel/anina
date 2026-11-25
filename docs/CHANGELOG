@@ -15,6 +15,7 @@
 
 ### Fixed
 
+- The screen a `Wait` held on is always a frame of the step that waited. Read between two samples, it used to become a frame only after the next step, so with a `Caption` right after the wait the transcript showed the step ending on the screen before it, or not, by where the sampling clock stood. `selfcheck` found it: the same run compared different on a slower machine.
 - `--sandbox strict` holds for everything a run starts. A tape's `Exec`, a preset's `[[prepare]]` and `explore --before` now run inside the OS sandbox, behind the same prefix as the program; before, only the program did, and the shell lines of the same run wrote wherever they could. A refused line fails with the reason: `the sandbox refused it: --sandbox strict allows writes only under the sandbox root (...)`. `prepare` may also write anina's cache, where presets keep clones and builds; a toolchain's own cache (`~/.cargo`) is not writable, so a build that fills one runs first under `env` (ADR-0006).
 - Under `--sandbox strict` on macOS, a program can no longer remove the sandbox root and leave a link in its place, and a root that is a link is refused.
 - A run stops when a `prepare` moved a folder that holds the sandbox root, or left a link on the way to the root or to its saved copy: `prepare moved the sandbox root or put a link in its path`. Before, anina followed the link and made or removed folders where it pointed. The next run checks the way to its root before it empties it, and on macOS `strict` refuses the move itself.

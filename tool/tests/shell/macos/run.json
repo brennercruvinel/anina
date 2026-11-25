@@ -9,10 +9,10 @@
       "error": null,
       "exit_code": 0,
       "first_screen": 0.03,
-      "frames": 157,
+      "frames": 156,
       "name": "basics",
-      "screens": 137,
-      "seconds": 20.07,
+      "screens": 133,
+      "seconds": 19.02,
       "shots": [
         "basics/shots/01-where",
         "basics/shots/02-files",
@@ -26,7 +26,7 @@
     }
   ],
   "preset": "shell",
-  "recorded": "2026-11-25T11:54:47Z",
+  "recorded": "2026-11-25T12:02:31Z",
   "sandbox": "env",
-  "seconds": 20.21
+  "seconds": 19.1
 }
