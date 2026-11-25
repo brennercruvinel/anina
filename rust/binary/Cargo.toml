@@ -18,6 +18,10 @@ path = "src/main.rs"
 name = "leaks"
 path = "../../tool/tests/leaks.rs"
 
+[[test]]
+name = "walls"
+path = "../../tool/tests/walls.rs"
+
 [dependencies]
 anina-screen.workspace = true
 anina-runner.workspace = true

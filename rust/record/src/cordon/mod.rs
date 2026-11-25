@@ -8,10 +8,16 @@
 //! - `strict`: the same, inside the OS sandbox (macOS `sandbox-exec`, Linux
 //!   `bwrap`), where a write outside the root, /dev and the temp dirs fails.
 //! - `off`: run as is, with the caller's environment.
+//!
+//! Everything a run starts goes through one prefix (`Wrap`): the program a
+//! tape spawns and the shell lines around it (`Exec`, a preset's `prepare`,
+//! explore's `--before`). The fresh environment is the program's alone: a
+//! shell line keeps the caller's (see `shell`).
 
 pub mod diffs;
 pub mod linux;
 pub mod macos;
+pub mod shell;
 
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -47,13 +53,33 @@ pub struct Sandbox {
     pub work: PathBuf,
 }
 
+/// How the processes of a run start: the argv prefix that puts each one
+/// inside the OS sandbox, and what that sandbox allows, to say so when it
+/// refuses. The default confines nothing.
+#[derive(Clone, Debug, Default)]
+pub struct Wrap {
+    /// `sandbox-exec -p PROFILE` or `bwrap ... --`; empty when nothing confines.
+    pub prefix: Vec<String>,
+    /// The folders a write is allowed under, the root first.
+    pub writable: Vec<PathBuf>,
+}
+
+impl Wrap {
+    /// `argv` behind the prefix: the one way into the sandbox, for the
+    /// program and for every shell line.
+    pub fn argv<S: AsRef<str>>(&self, argv: &[S]) -> Vec<String> {
+        self.prefix.iter().cloned().chain(argv.iter().map(|a| a.as_ref().to_string())).collect()
+    }
+}
+
 impl Sandbox {
     /// Create (or reuse) the sandbox directories under `root`.
     pub fn new(root: &Path, mode: Mode) -> Result<Sandbox> {
         std::fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
         // the real path: macOS's /tmp is /private/tmp, and sandbox rules match real paths
         let root = std::fs::canonicalize(root)?;
-        let sb = Sandbox { mode, home: root.join("home"), tmp: root.join("tmp"), work: root.join("work"), root };
+        let (home, tmp, work) = (root.join("home"), root.join("tmp"), root.join("work"));
+        let sb = Sandbox { mode, home, tmp, work, root };
         for d in [&sb.home, &sb.tmp, &sb.work] {
             std::fs::create_dir_all(d)?;
         }
@@ -111,14 +137,22 @@ impl Sandbox {
         env
     }
 
-    /// The argv prefix that puts a program inside the OS sandbox (empty
-    /// unless `strict`).
-    pub fn wrap(&self) -> Vec<String> {
-        match self.mode {
-            Mode::Strict if cfg!(target_os = "macos") => macos::wrap(&self.root),
-            Mode::Strict => linux::wrap(&self.root, &self.home, &self.tmp),
-            _ => Vec::new(),
+    /// What puts a process of this run inside the OS sandbox (nothing unless
+    /// `strict`).
+    pub fn wrap(&self) -> Wrap {
+        self.wrap_with(&[])
+    }
+
+    /// `wrap`, with `more` folders writable besides the root (real paths): a
+    /// preset's prepare clones and builds in anina's cache.
+    pub fn wrap_with(&self, more: &[PathBuf]) -> Wrap {
+        if self.mode != Mode::Strict {
+            return Wrap::default();
         }
+        let prefix =
+            if cfg!(target_os = "macos") { macos::wrap(&self.root, more) } else { linux::wrap(&self.root, more) };
+        let writable = std::iter::once(&self.root).chain(more).cloned().collect();
+        Wrap { prefix, writable }
     }
 
     fn check_tool(&self) -> Result<()> {

@@ -287,7 +287,9 @@ impl Stage {
         }
         red.rules.extend(Redactor::defaults().rules);
 
-        // prepare: clones, builds, installs; cached by `creates`
+        // prepare: clones, builds, installs; cached by `creates`. Under strict
+        // it writes the cache too, where clones and builds are kept (ADR-0006)
+        let prepares = sb.wrap_with(&[std::fs::canonicalize(cache_dir())?]);
         for (i, p) in m.prepare.iter().enumerate() {
             let label = if p.about.is_empty() { format!("prepare {}", i + 1) } else { p.about.clone() };
             let gaps = missing_needs(&p.needs, &vars);
@@ -303,16 +305,7 @@ impl Stage {
                 }
             }
             say(format!("{label}…"));
-            let st = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&p.run)
-                .current_dir(a.out)
-                .envs(&vars)
-                .status()
-                .context("running sh")?;
-            if !st.success() {
-                bail!("{label} failed ({st}): {}", p.run);
-            }
+            prepares.sh(&[], &p.run).cwd(a.out).envs(&vars).run(&label)?;
         }
 
         let theme = m.theme.as_ref().map(|t| dir.join(t).display().to_string()).unwrap_or_default();
