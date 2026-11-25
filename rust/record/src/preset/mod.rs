@@ -255,7 +255,7 @@ impl Stage {
         if !a.keep && root.exists() {
             remove_tree(&root).with_context(|| format!("emptying {}", root.display()))?;
         }
-        let sb = Sandbox::new(&root, mode)?;
+        let sb = Sandbox { network: m.network, ..Sandbox::new(&root, mode)? };
 
         let mut base = HashMap::new();
         for (k, v) in [

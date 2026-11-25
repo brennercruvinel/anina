@@ -1,6 +1,6 @@
 //! The shell lines of a run: a tape's `Exec`, a preset's `[[prepare]]`,
 //! explore's `--before`. Each one starts behind the same prefix as the
-//! program (`Wrap::argv`), so `strict` holds its writes too.
+//! program (`Wrap::argv`), so `strict` holds its writes and its network too.
 //!
 //! A line keeps the environment and the working directory its caller gives
 //! it: the fresh HOME and the empty environment are the program's. When a
@@ -16,8 +16,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// How the system words a refusal: `EPERM` under `sandbox-exec`, `EROFS`
-/// under `bwrap` (a write outside the bound folders).
+/// How the system words a refusal: `EPERM` under `sandbox-exec` (a write or
+/// a connection), `EROFS` under `bwrap` (a write outside the bound folders).
 /// Text, so a machine that words its errors in another language gets the
 /// plain note instead.
 const REFUSALS: [&str; 2] = ["Operation not permitted", "Read-only file system"];
@@ -55,7 +55,8 @@ impl Wrap {
             let dir = dir.display();
             under.push_str(&if i == 0 { format!("the sandbox root ({dir})") } else { format!(" and {dir}") });
         }
-        Some(format!("{lead}: --sandbox strict allows writes only under {under}"))
+        let network = if self.network { "on" } else { "off (a preset turns it on with network = true)" };
+        Some(format!("{lead}: --sandbox strict allows writes only under {under}, and the network is {network}"))
     }
 }
 
@@ -138,26 +139,40 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn strict(writable: &[&str]) -> Wrap {
-        Wrap { prefix: vec!["tool".into()], writable: writable.iter().map(PathBuf::from).collect() }
+    fn strict(writable: &[&str], network: bool) -> Wrap {
+        Wrap { prefix: vec!["tool".into()], writable: writable.iter().map(PathBuf::from).collect(), network }
     }
 
     #[test]
     fn a_failure_says_what_the_sandbox_allows_and_whether_it_refused() {
-        let allows = "--sandbox strict allows writes only under the sandbox root (/c/sandbox/x)";
+        let off = "the network is off (a preset turns it on with network = true)";
         for (wrap, stderr, want) in [
             (Wrap::default(), "sh: /x: Operation not permitted", None),
             (
-                strict(&["/c/sandbox/x"]),
+                strict(&["/c/sandbox/x"], false),
                 "sh: /x: Operation not permitted\n",
-                Some(format!("the sandbox refused it: {allows}")),
+                Some(format!(
+                    "the sandbox refused it: --sandbox strict allows writes only under the sandbox root \
+                     (/c/sandbox/x), and {off}"
+                )),
             ),
             (
-                strict(&["/c/sandbox/x", "/c"]),
+                strict(&["/c/sandbox/x", "/c"], true),
                 "touch: cannot touch '/x': Read-only file system\n",
-                Some(format!("the sandbox refused it: {allows} and /c")),
+                Some(
+                    "the sandbox refused it: --sandbox strict allows writes only under the sandbox root \
+                     (/c/sandbox/x) and /c, and the network is on"
+                        .to_string(),
+                ),
             ),
-            (strict(&["/c/sandbox/x"]), "grep: no match\n", Some(format!("it ran confined: {allows}"))),
+            (
+                strict(&["/c/sandbox/x"], false),
+                "curl: (6) Could not resolve host: example.com\n",
+                Some(format!(
+                    "it ran confined: --sandbox strict allows writes only under the sandbox root (/c/sandbox/x), \
+                     and {off}"
+                )),
+            ),
         ] {
             assert_eq!(wrap.explain(stderr), want, "{stderr:?}");
         }
@@ -165,7 +180,7 @@ mod tests {
 
     #[test]
     fn a_line_goes_behind_the_prefix_with_its_flags() {
-        let wrap = strict(&["/r"]);
+        let wrap = strict(&["/r"], false);
         let line = wrap.sh(&["-u"], "echo hi");
         let args: Vec<_> = line.cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!((line.cmd.get_program().to_str(), args.join(" ").as_str()), (Some("tool"), "sh -u -c echo hi"));
@@ -184,14 +199,16 @@ mod tests {
     fn a_confined_line_that_fails_carries_the_note_and_does_not_wait_for_what_it_left_behind() {
         // `env` stands for the sandbox tool: the pipe, the note and the wait
         // are the same. The sleep keeps stderr open after the line ended.
-        let wrap = Wrap { prefix: vec!["/usr/bin/env".into()], writable: vec![PathBuf::from("/r")] };
+        let wrap = Wrap { prefix: vec!["/usr/bin/env".into()], writable: vec![PathBuf::from("/r")], network: true };
         let t0 = std::time::Instant::now();
         let e = wrap.sh(&[], "sleep 4 & echo 'x: Operation not permitted' >&2; exit 1").run("Exec").unwrap_err();
         assert!(t0.elapsed() < Duration::from_secs(3), "waited for the background process");
         let e = e.to_string();
         assert!(e.starts_with("Exec failed (exit status: 1): sleep 4 &"), "{e}");
         assert!(
-            e.ends_with("\nthe sandbox refused it: --sandbox strict allows writes only under the sandbox root (/r)"),
+            e.ends_with(
+                "\nthe sandbox refused it: --sandbox strict allows writes only under the sandbox root (/r), and the network is on"
+            ),
             "{e}"
         );
     }

@@ -6,7 +6,7 @@
 //! homepage = "https://burn.dev"
 //! sandbox = "env"                 # off | env | strict
 //! theme = "theme.json"            # optional, next to preset.toml
-//! network = true                  # informational
+//! network = true                  # under strict, the network is off without it
 //!
 //! [[requires]]
 //! program = "cargo"

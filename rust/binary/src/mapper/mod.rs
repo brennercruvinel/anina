@@ -890,6 +890,7 @@ pub fn run(a: Args) -> Result<()> {
         rows: a.rows,
         before: a.before.clone(),
     };
+    // no preset here to declare a network: under strict there is none
     let wrap = sb.as_ref().map(|s| s.wrap()).unwrap_or_default();
     let argv = wrap.argv(&a.command);
     let mut spec = Spec::new(argv[0].clone(), argv[1..].to_vec());

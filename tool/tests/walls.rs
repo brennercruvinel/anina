@@ -1,8 +1,10 @@
 //! The walls of `--sandbox strict`, tried from inside: a tape's `Exec`, a
-//! preset's `prepare` and the program itself write outside the root.
+//! preset's `prepare` and the program itself write outside the root and
+//! reach for the network.
 //!
 //! The same tests run on macOS (`sandbox-exec`) and on Linux (`bwrap`); the
-//! one thing that differs is named below.
+//! two things that differ are named below. Nothing here leaves the machine:
+//! the network is a listener this test opens on the loopback.
 //!
 //! Every folder is under cargo's target dir. The temp dir would hide a
 //! missing wall: macOS's is writable inside the sandbox, and Linux's /tmp is
@@ -12,6 +14,7 @@
 use anina_record::cordon::{Mode, Sandbox};
 use anina_record::{Config, Options, record};
 use anina_runner::script::{Line, Step, Tape};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -19,6 +22,14 @@ use std::process::{Command, Output};
 const TOOL: &str = "sandbox-exec";
 #[cfg(target_os = "linux")]
 const TOOL: &str = "bwrap";
+
+/// How a failed connection reads. `sandbox-exec` answers `EPERM`, which
+/// anina reports as a refusal. In `bwrap`'s own network namespace nothing
+/// listens, which looks like any failed connection: the plain note.
+#[cfg(target_os = "macos")]
+const NO_NETWORK: &str = "the sandbox refused it";
+#[cfg(target_os = "linux")]
+const NO_NETWORK: &str = "it ran confined";
 
 /// Whether the OS sandbox is here to be tried. Without it a test says so and
 /// passes on a developer's machine; in CI it fails, where a wall nobody
@@ -53,6 +64,12 @@ fn quoted(text: &str) -> String {
 /// `sh` writing one line to `file`.
 fn write_to(file: &Path) -> String {
     format!("echo written > {}", quoted(&file.display().to_string()))
+}
+
+/// `sh` opening a connection to this machine's `port`. bash does it by
+/// itself, and both systems have it.
+fn connect_to(port: u16) -> String {
+    format!("bash -c 'exec 3<>/dev/tcp/127.0.0.1/{port}'")
 }
 
 /// Play a tape of `Exec` lines the way a part of `anina run` is played.
@@ -116,6 +133,30 @@ fn the_program_writes_inside_the_root_and_nowhere_else() {
 
     assert!(program(&sandbox(&dir, Mode::Env), &write_to(&outside)));
     assert!(outside.exists());
+}
+
+#[test]
+fn no_network_under_strict_unless_it_is_declared() {
+    if !walls() {
+        return;
+    }
+    let dir = scratch("network");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let connect = connect_to(listener.local_addr().unwrap().port());
+
+    // the listener answers: without the OS sandbox the connection opens
+    assert!(program(&sandbox(&dir, Mode::Env), &connect));
+
+    let closed = sandbox(&dir, Mode::Strict);
+    assert!(!program(&closed, &connect), "the program reached the network");
+    let e = exec(&closed, &connect).unwrap_err();
+    let said = format!("{e:#}");
+    assert!(said.contains(NO_NETWORK), "{said}");
+    assert!(said.contains("the network is off (a preset turns it on with network = true)"), "{said}");
+
+    let open = Sandbox { network: true, ..sandbox(&dir, Mode::Strict) };
+    assert!(program(&open, &connect), "network = true did not open the network");
+    exec(&open, &connect).unwrap();
 }
 
 #[test]
@@ -225,4 +266,34 @@ fn anina_run_keeps_prepare_inside_the_root_and_the_cache() {
     let o = run(&dir, &p, &["--sandbox", "strict"]);
     assert!(!o.status.success(), "{}", stderr(&o));
     assert!(!stolen.exists(), "an Exec wrote the cache");
+}
+
+#[test]
+fn anina_run_opens_the_network_for_a_preset_that_declares_it() {
+    if !walls() {
+        return;
+    }
+    let dir = scratch("declared");
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let prepare = format!("[[prepare]]\nabout = \"fetch\"\nrun = \"{}\"\n", connect_to(port));
+    // the program reaches it too, and says so on its screen
+    let tape = format!(
+        "Exec {}\nSpawn bash -c 'exec 3<>/dev/tcp/127.0.0.1/{port} && echo reached; sleep 1'\nWait \"reached\"\n",
+        connect_to(port)
+    );
+
+    // no `network = true`: the first thing to reach out is refused
+    let p = preset(&dir, &prepare, &tape);
+    let o = run(&dir, &p, &["--sandbox", "strict"]);
+    let said = stderr(&o);
+    assert!(!o.status.success(), "{said}");
+    assert!(said.contains("fetch failed"), "{said}");
+    assert!(said.contains(NO_NETWORK), "{said}");
+    assert!(said.contains("the network is off (a preset turns it on with network = true)"), "{said}");
+
+    // declared: prepare, the Exec and the program all reach the listener
+    let p = preset(&dir, &format!("network = true\n{prepare}"), &tape);
+    let o = run(&dir, &p, &["--sandbox", "strict"]);
+    assert!(o.status.success(), "{}", stderr(&o));
 }

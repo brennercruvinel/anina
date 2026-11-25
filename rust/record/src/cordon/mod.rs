@@ -6,7 +6,8 @@
 //!   LANG and TERM, with HOME, XDG_*_HOME and TMPDIR under the root. It can
 //!   still write anywhere it has permission to; it just has no reason to.
 //! - `strict`: the same, inside the OS sandbox (macOS `sandbox-exec`, Linux
-//!   `bwrap`), where a write outside the root, /dev and the temp dirs fails.
+//!   `bwrap`), where a write outside the root, /dev and the temp dirs fails
+//!   and the network is off unless the preset says `network = true`.
 //! - `off`: run as is, with the caller's environment.
 //!
 //! Everything a run starts goes through one prefix (`Wrap`): the program a
@@ -51,6 +52,9 @@ pub struct Sandbox {
     pub tmp: PathBuf,
     /// A working directory for the program, empty at first.
     pub work: PathBuf,
+    /// Under `strict`: whether the network is reachable (a preset's
+    /// `network = true`). Off where nothing declares it.
+    pub network: bool,
 }
 
 /// How the processes of a run start: the argv prefix that puts each one
@@ -62,6 +66,7 @@ pub struct Wrap {
     pub prefix: Vec<String>,
     /// The folders a write is allowed under, the root first.
     pub writable: Vec<PathBuf>,
+    pub network: bool,
 }
 
 impl Wrap {
@@ -79,7 +84,7 @@ impl Sandbox {
         // the real path: macOS's /tmp is /private/tmp, and sandbox rules match real paths
         let root = std::fs::canonicalize(root)?;
         let (home, tmp, work) = (root.join("home"), root.join("tmp"), root.join("work"));
-        let sb = Sandbox { mode, home, tmp, work, root };
+        let sb = Sandbox { mode, home, tmp, work, root, network: false };
         for d in [&sb.home, &sb.tmp, &sb.work] {
             std::fs::create_dir_all(d)?;
         }
@@ -149,10 +154,13 @@ impl Sandbox {
         if self.mode != Mode::Strict {
             return Wrap::default();
         }
-        let prefix =
-            if cfg!(target_os = "macos") { macos::wrap(&self.root, more) } else { linux::wrap(&self.root, more) };
+        let prefix = if cfg!(target_os = "macos") {
+            macos::wrap(&self.root, more, self.network)
+        } else {
+            linux::wrap(&self.root, more, self.network)
+        };
         let writable = std::iter::once(&self.root).chain(more).cloned().collect();
-        Wrap { prefix, writable }
+        Wrap { prefix, writable, network: self.network }
     }
 
     fn check_tool(&self) -> Result<()> {
