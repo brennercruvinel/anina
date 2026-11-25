@@ -57,7 +57,8 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    checks::mark_start();
+    // before the command writes anything: the check at its end reads what was written since
+    let started = std::time::SystemTime::now();
     // the one scope of this command: what it hides, what it hid, where it
     // wrote. A config that does not load is the command's error, and the
     // terminal still hides who and where this is.
@@ -70,7 +71,7 @@ fn main() {
     };
     // what the command wrote is checked whether it worked or not: a failed
     // wait leaves its screen in failed.txt and failed.ansi
-    let checked = checks::verify_written(&scope);
+    let checked = checks::verify_written(&scope, started);
     let failed: Vec<anyhow::Error> = [ran.err(), checked.err()].into_iter().flatten().collect();
     for e in &failed {
         eprintln!("anina: {}", scope.redactor().quiet(&format!("{e:#}")));
