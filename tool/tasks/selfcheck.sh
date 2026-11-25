@@ -4,11 +4,18 @@
 # what anina records fails here, with the files that differ and, for the
 # texts, what changed in them.
 #
-#   tool/tasks/selfcheck.sh            compare; exits 1 on a difference
-#   tool/tasks/selfcheck.sh --update   play again and keep the run as the reference
+#   tool/tasks/selfcheck.sh                     compare; exits 1 on a difference
+#   tool/tasks/selfcheck.sh --update            play again and keep the run as this system's reference
+#   tool/tasks/selfcheck.sh --keep SYSTEM RUN   keep a run recorded elsewhere as SYSTEM's reference
 #
-# a pull request that changes what anina records on purpose runs `--update`
-# on macOS and on Linux and brings both references with the change.
+# a pull request that changes what anina records on purpose brings both
+# references with the change. a reference is recorded where the check runs:
+# gatecheck uploads the run of each system as an artifact (`selfcheck-linux`,
+# `selfcheck-macos`), and `--keep linux DIR` keeps a downloaded one, so a Mac
+# is enough to bring the Linux reference too:
+#
+#   gh run download RUN_ID --name selfcheck-linux --dir /tmp/selfcheck-linux
+#   tool/tasks/selfcheck.sh --keep linux /tmp/selfcheck-linux
 #
 # one reference per system (ADR-0017): the preset runs the system's `sh`,
 # bash on macOS and dash on most of Linux, and they leave different things
@@ -17,12 +24,37 @@
 # bytes follow the clock (the SVG, the cast, index.html), are kept empty.
 # run from anywhere.
 set -eu
+called=$(pwd)
 cd "$(dirname "$0")/../.."
+
+# the run in $1 becomes the reference in $2. the files compare only wants
+# present, because their bytes follow the clock, are kept empty
+keep() {
+  rm -rf "$2"
+  mkdir -p "$(dirname "$2")"
+  cp -R "$1" "$2"
+  find "$2" -type f \( -name '*.svg' -o -name '*.gz' -o -name '*.html' -o -name '*.cast' \) \
+    -exec sh -c ': >"$1"' sh {} \;
+}
 
 case "${1:-}" in
   "" | --update) ;;
+  --keep)
+    # RUN is given from where the script was called
+    case "${3:-}" in
+      /*) from=$3 ;;
+      *) from="$called/${3:-}" ;;
+    esac
+    if [ $# -ne 3 ] || [ ! -f "$from/run.json" ]; then
+      echo "usage: tool/tasks/selfcheck.sh --keep SYSTEM RUN (RUN is a run's folder: it holds run.json)" >&2
+      exit 2
+    fi
+    keep "$from" "tool/tests/shell/$2"
+    echo "selfcheck: the run in $3 is now the reference in tool/tests/shell/$2; commit it with the change that moved it" >&2
+    exit 0
+    ;;
   *)
-    echo "usage: tool/tasks/selfcheck.sh [--update]" >&2
+    echo "usage: tool/tasks/selfcheck.sh [--update | --keep SYSTEM RUN]" >&2
     exit 2
     ;;
 esac
@@ -52,11 +84,7 @@ if [ "${1:-}" = --update ]; then
     echo "selfcheck: $kept already matches this run; left as it is" >&2
     exit 0
   fi
-  find "$run" -type f \( -name '*.svg' -o -name '*.gz' -o -name '*.html' -o -name '*.cast' \) \
-    -exec sh -c ': >"$1"' sh {} \;
-  rm -rf "$kept"
-  mkdir -p "$(dirname "$kept")"
-  cp -R "$run" "$kept"
+  keep "$run" "$kept"
   echo "selfcheck: this run is now the reference in $kept; commit it with the change that moved it" >&2
   exit 0
 fi

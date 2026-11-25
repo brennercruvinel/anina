@@ -38,6 +38,16 @@ jobs:
           fallback: none
       - run: tool/tasks/provision.sh
       - run: tool/tasks/fullcheck.sh
+      # the run selfcheck recorded on this system: what to look at when the
+      # gate fails, and the reference for a system a developer does not have
+      # (tool/tasks/selfcheck.sh --keep)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: selfcheck-${{ matrix.name }}
+          path: target/selfcheck/run
+          if-no-files-found: ignore
+          retention-days: 14
 
   # the oldest Rust the manifest promises: `rust-version` in Cargo.toml, read
   # from there so the two cannot drift

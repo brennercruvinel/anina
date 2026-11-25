@@ -2,10 +2,11 @@ a shell, recorded by anina
 ==========================
 
 [0.0s]
+    $
 
 ## 1 · where the sandbox puts you
 
-[1.7s]
+[1.6s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -13,7 +14,7 @@ a shell, recorded by anina
 
 ## 2 · files
 
-[6.0s]
+[4.8s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -24,7 +25,7 @@ a shell, recorded by anina
 
 ## 3 · colors
 
-[16.5s]
+[12.7s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -38,7 +39,7 @@ a shell, recorded by anina
 
 ## 4 · a clean environment
 
-[24.1s]
+[17.2s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -48,12 +49,12 @@ a shell, recorded by anina
     $ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
     ne\033[0m\n'
     green truecolor underline
-    $ env | cut -d= -f1 | sort | tr '\n' ' '; echo
+    $ env | cut -d= -f1 | LC_ALL=C sort | tr '\n' ' '; echo
     COLORTERM HOME LANG LOGNAME PATH PS1 PWD SHELL TERM TMPDIR USER XDG_CACHE_HOME XDG_C
     ONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME
     $
 
-[27.0s]
+[19.0s]
     $ pwd; echo ~
     /sandbox/work
     ~
@@ -63,7 +64,7 @@ a shell, recorded by anina
     $ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
     ne\033[0m\n'
     green truecolor underline
-    $ env | cut -d= -f1 | sort | tr '\n' ' '; echo
+    $ env | cut -d= -f1 | LC_ALL=C sort | tr '\n' ' '; echo
     COLORTERM HOME LANG LOGNAME PATH PS1 PWD SHELL TERM TMPDIR USER XDG_CACHE_HOME XDG_C
     ONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME
     $ exit

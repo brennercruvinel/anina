@@ -7,7 +7,7 @@ hello from anina
 $ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
 ne\033[0m\n'
 green truecolor underline
-$ env | cut -d= -f1 | sort | tr '\n' ' '; echo
+$ env | cut -d= -f1 | LC_ALL=C sort | tr '\n' ' '; echo
 COLORTERM HOME LANG LOGNAME PATH PS1 PWD SHELL TERM TMPDIR USER XDG_CACHE_HOME XDG_C
 ONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME
 $
