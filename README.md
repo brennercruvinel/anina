@@ -142,7 +142,16 @@ anina checks its own output with its own command. `tool/tasks/selfcheck.sh` play
 
 Mouse input isn't scripted yet. Glyphs outside JetBrains Mono (CJK, emoji, some arrows) fall back to the viewer's fonts. `explore` treats screens with the same key bar and most cells equal as one state, so a search box can show up as a screen of its own. Windows is untested, and on macOS a process list still shows real app names; `mask` rules are how you hide them.
 
-MIT, see [LICENSE](LICENSE). [Hoff Research](https://hoffresearch.com). JetBrains Mono is under the SIL Open Font License ([`OFL.txt`](data/theme/fonts/mono/jetbrains/OFL.txt)).
+MIT, see [LICENSE](LICENSE). JetBrains Mono is under the SIL Open Font License ([`OFL.txt`](data/theme/fonts/mono/jetbrains/OFL.txt)).
 
-Made it simple, but significant (∂μFμν = Jν)<br>
+<details>
+    
+----
+
+Copyright [Hoff Research](https://hoffresearch.com)
+
+Made it simple, but significant (∂μFμν = Jν)
+
 Author: Brenner Cruvinel
+
+</details>
