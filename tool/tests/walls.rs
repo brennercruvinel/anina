@@ -391,3 +391,33 @@ fn anina_run_opens_the_network_for_a_preset_that_declares_it() {
     let o = run(&dir, &p, &["--sandbox", "strict"]);
     assert!(o.status.success(), "{}", stderr(&o));
 }
+
+/// A built-in preset is emptied and extracted under `CACHE/presets` on every
+/// run, and a `prepare` writes the cache. Through a link it left there, the
+/// folder of the preset's name out there would be emptied and filled.
+#[test]
+fn a_built_in_preset_is_not_extracted_through_a_link_in_the_cache() {
+    let dir = scratch("presets");
+    let mine = dir.join("elsewhere/shell/mine.txt");
+    std::fs::create_dir_all(mine.parent().unwrap()).unwrap();
+    std::fs::write(&mine, "mine").unwrap();
+    std::fs::create_dir_all(dir.join("cache")).unwrap();
+    std::os::unix::fs::symlink(dir.join("elsewhere"), dir.join("cache/presets")).unwrap();
+
+    // from a folder with no `demo/` and a HOME with no presets: `shell` is the built-in one
+    let o = Command::new(env!("CARGO_BIN_EXE_anina"))
+        .args(["run", "shell", "-o"])
+        .arg(dir.join("out"))
+        .current_dir(&dir)
+        .env("HOME", &dir)
+        .env_remove("ANINA_PRESETS")
+        .env("ANINA_CACHE", dir.join("cache"))
+        .env("ANINA_CONFIG", "/dev/null")
+        .output()
+        .unwrap();
+    let said = stderr(&o);
+    assert!(mine.exists(), "anina emptied a folder through the link: {said}");
+    assert!(!dir.join("elsewhere/shell/preset.toml").exists(), "anina extracted through the link: {said}");
+    assert!(!o.status.success(), "{said}");
+    assert!(said.contains(FOUND[1]), "{said}");
+}
