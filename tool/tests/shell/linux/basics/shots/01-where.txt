@@ -1,0 +1,4 @@
+$ pwd; echo ~
+/sandbox/work
+~
+$
