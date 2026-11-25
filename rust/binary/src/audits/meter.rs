@@ -382,3 +382,6 @@ impl Outcome {
         }
     }
 }
+
+#[cfg(test)]
+pub(super) mod tests;

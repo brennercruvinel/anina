@@ -264,3 +264,192 @@ pub fn summary(r: &Report) -> String {
 fn clip(s: &str, n: usize) -> String {
     if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n - 1).collect::<String>()) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::meter::tests::{matrix, ran};
+    use super::super::score::all_scores;
+    use super::*;
+    use anina_screen::escape::parse;
+    use std::path::PathBuf;
+
+    /// The default matrix: the baseline answered fast, 60x20 broke on a wait
+    /// (the error names a tape under HOME), the NO_COLOR terminal got colors.
+    fn outcomes() -> Vec<Outcome> {
+        let mut all: Vec<Outcome> = matrix().iter().map(|v| ran(v, "ready")).collect();
+        all[0].first_screen_s = Some(0.18);
+        (all[0].latency.p50_ms, all[0].latency.p95_ms) = (Some(20.0), Some(40.0));
+        let tape = std::env::var("HOME").map_or("tapes/app.tape".to_string(), |h| format!("{h}/tapes/app.tape"));
+        all[2].status = Status::Broke { error: format!("{tape}:3: Wait \"Files\" never came") };
+        all[5] = ran(&all[5].variant, "\x1b[31mready\x1b[0m");
+        all
+    }
+
+    fn report<'a>(scores: &'a [Score], variants: &'a [Outcome]) -> Report<'a> {
+        Report {
+            tool: "anina audit",
+            version: "0.0.0",
+            generated: "2026-01-01T00:00:00Z".into(),
+            target: "demo <app> & co".into(),
+            engine: "tui-test".into(),
+            scores,
+            variants,
+        }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("anina-print-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The home folder, when redaction has one to hide (as `Redactor::identity` reads it).
+    fn home() -> Option<String> {
+        std::env::var("HOME").ok().filter(|h| h.len() > 1)
+    }
+
+    /// The fields of the summary's row that starts with `name`.
+    fn row<'a>(summary: &'a str, name: &str) -> Vec<&'a str> {
+        let line = summary.lines().find(|l| l.split_whitespace().next() == Some(name));
+        line.unwrap_or_else(|| panic!("no row {name} in:\n{summary}")).split_whitespace().collect()
+    }
+
+    #[test]
+    fn the_summary_has_a_row_per_score_and_per_terminal() {
+        let all = outcomes();
+        let scores = all_scores(&all);
+        let s = summary(&report(&scores, &all));
+        // (6 + 0.5) / 7 terminals ran; 7 of 9 checks passed elsewhere
+        for (category, score) in [
+            ("stability", "93"),
+            ("responsiveness", "100"),
+            ("readability", "100"),
+            ("compatibility", "78"),
+            ("hygiene", "100"),
+        ] {
+            assert_eq!(row(&s, category)[..2], [category, score], "{s}");
+        }
+        assert_eq!(row(&s, "120x40-truecolor"), ["120x40-truecolor", "ok", "180ms", "20/40", "0.0%"]);
+        assert_eq!(row(&s, "120x40-256"), ["120x40-256", "ok", "–", "–", "0.0%", "ok"]);
+        assert_eq!(row(&s, "60x20-truecolor")[..2], ["60x20-truecolor", "broke"]);
+        assert!(s.contains("app.tape:3: Wait \"Files\" never came"), "the failure is not told:\n{s}");
+        assert!(s.contains("✗ 5 of 5 visible cells colored with NO_COLOR=1"), "{s}");
+
+        // a score nothing could measure shows a dash, not a zero
+        let quiet = [ran(&matrix()[0], "")];
+        let scores = all_scores(&quiet);
+        let s = summary(&report(&scores, &quiet));
+        assert_eq!(row(&s, "responsiveness")[1], "–", "{s}");
+        assert_eq!(row(&s, "readability")[1], "–", "{s}");
+        assert_eq!(row(&s, "120x40-truecolor"), ["120x40-truecolor", "ok", "–", "–", "–"]);
+    }
+
+    #[test]
+    fn report_json_holds_every_score_and_terminal_and_nothing_of_the_machine() {
+        let all = outcomes();
+        let scores = all_scores(&all);
+        let dir = scratch("json");
+        write_json(&report(&scores, &all), &dir.join("report.json")).unwrap();
+        let text = std::fs::read_to_string(dir.join("report.json")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!((v["tool"].as_str(), v["target"].as_str()), (Some("anina audit"), Some("demo <app> & co")));
+        let cats: Vec<&str> = v["scores"].as_array().unwrap().iter().filter_map(|s| s["category"].as_str()).collect();
+        assert_eq!(cats, ["stability", "responsiveness", "readability", "compatibility", "hygiene"]);
+        assert_eq!(v["scores"][0]["score"], 93);
+        let terminals = v["variants"].as_array().unwrap();
+        assert_eq!(terminals.len(), 7);
+        let base = &terminals[0];
+        assert_eq!(base["variant"]["name"], "120x40-truecolor");
+        assert_eq!((&base["variant"]["baseline"], &base["variant"]["colors"]), (&true.into(), &"truecolor".into()));
+        assert_eq!((&base["status"]["kind"], &base["exit_code"]), (&"ok".into(), &0.into()));
+        assert_eq!(terminals[2]["status"]["kind"], "broke");
+        assert_eq!(terminals[5]["colors_respected"], false);
+        // the screenshot is a file beside the report, not a field of it
+        assert!(base.get("shot").is_none(), "{base}");
+        if let Some(home) = home() {
+            assert!(!text.contains(&home), "the report names the home folder");
+            assert_eq!(terminals[2]["status"]["error"], "~/tapes/app.tape:3: Wait \"Files\" never came");
+        }
+    }
+
+    #[test]
+    fn report_html_escapes_what_it_shows_and_lists_every_terminal() {
+        let mut all = outcomes();
+        all[1].shot_png = Some("terminals/80x24-truecolor/screen.png".into());
+        all[6].shot = None;
+        let scores = all_scores(&all);
+        let dir = scratch("html");
+        std::fs::create_dir_all(dir.join("terminals/80x24-truecolor")).unwrap();
+        std::fs::write(dir.join("terminals/80x24-truecolor/screen.png"), b"PNG!").unwrap();
+        let page = |embed: bool| {
+            write_html(&report(&scores, &all), &dir.join("report.html"), embed).unwrap();
+            std::fs::read_to_string(dir.join("report.html")).unwrap()
+        };
+        let (html, embedded) = (page(false), page(true));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(html.contains("<title>anina audit · demo &lt;app&gt; &amp; co</title>"), "the target is not escaped");
+        assert!(!html.contains("<app>"));
+        for o in &all {
+            assert!(html.contains(&format!("<td><code>{}</code>", o.variant.name)), "{} has no row", o.variant.name);
+            assert!(
+                html.contains(&format!("<header><code>{}</code>", o.variant.name)),
+                "{} has no card",
+                o.variant.name
+            );
+        }
+        assert_eq!(html.matches("<span class=\"chip\">baseline</span>").count(), 1);
+        assert_eq!(html.matches("<td><span class=\"chip broke\">broke</span></td>").count(), 1);
+        assert!(html.contains("✗ 5 of 5 visible cells colored with NO_COLOR=1"));
+        // a terminal shows its PNG, or its screen as text, or says it has none
+        assert!(html.contains("<img src=\"terminals/80x24-truecolor/screen.png\" alt=\"80x24-truecolor\">"));
+        assert!(html.contains("<pre class=\"term\"><span style=\"color:#e5e5e5\">ready"));
+        assert_eq!(html.matches("<pre class=\"term\">(no screen)</pre>").count(), 1);
+        // --embed puts the image inside the page
+        assert!(embedded.contains("<img src=\"data:image/png;base64,UE5HIQ==\" alt=\"80x24-truecolor\">"));
+        if let Some(home) = home() {
+            assert!(!html.contains(&home), "the page names the home folder");
+            assert!(html.contains("~/tapes/app.tape:3: Wait &quot;Files&quot; never came"));
+        }
+    }
+
+    #[test]
+    fn a_score_is_good_from_90_fair_from_50_and_poor_below() {
+        let mark = |score: Option<u8>| Score { category: "stability", score, rule: "r", explain: Vec::new() };
+        let scores: Vec<Score> = [Some(100), Some(90), Some(89), Some(50), Some(49), Some(0), None].map(mark).into();
+        let dir = scratch("bands");
+        write_html(&report(&scores, &[]), &dir.join("report.html"), false).unwrap();
+        let html = std::fs::read_to_string(dir.join("report.html")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        for (band, shown, filled) in [
+            ("good", "100", 100),
+            ("good", "90", 90),
+            ("fair", "89", 89),
+            ("fair", "50", 50),
+            ("poor", "49", 49),
+            ("poor", "0", 0),
+            // nothing measured: a dash and an empty gauge
+            ("na", "–", 0),
+        ] {
+            let gauge = format!(
+                "<section class=\"score {band}\"><div class=\"gauge\" style=\"--v:{filled}\"><span>{shown}</span>"
+            );
+            assert_eq!(html.matches(&gauge).count(), 1, "{band} {shown}");
+        }
+    }
+
+    #[test]
+    fn a_screen_becomes_spans_in_the_colors_it_is_seen_in() {
+        let s = parse("\x1b[1;31mhi\x1b[0m x\n\x1b[44m<b>\x1b[0m\n\x1b[3;4;7mi\x1b[0m", 6, 4);
+        let want = concat!(
+            "<span style=\"color:#cd0000;font-weight:700\">hi</span><span style=\"color:#e5e5e5\"> x  </span>\n",
+            "<span style=\"color:#e5e5e5;background:#0000ee\">&lt;b&gt;</span><span style=\"color:#e5e5e5\">   </span>\n",
+            "<span style=\"color:#000000;background:#e5e5e5;font-style:italic;text-decoration:underline\">i</span>",
+            "<span style=\"color:#e5e5e5\">     </span>\n",
+        );
+        // the fourth row is empty and left out
+        assert_eq!(screen_html(&s), want);
+        assert_eq!(screen_html(&parse("", 4, 2)), "<span style=\"color:#e5e5e5\">    </span>\n");
+    }
+}
