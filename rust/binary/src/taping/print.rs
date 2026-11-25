@@ -40,6 +40,8 @@ pub struct Session {
     /// The screen when the session ended, and when.
     pub last: Screen,
     pub end: f64,
+    /// The program ended by itself: the last input is what ended it.
+    pub exited: bool,
     /// `Input::quiet` of the stretch after the last input.
     pub last_quiet: Mask,
     /// Cells that keep changing on every screen (a logo animation): volatile
@@ -326,8 +328,11 @@ pub fn write(s: &Session) -> String {
             None => (s.end, &s.last, &s.last_quiet),
         };
         let gap = next_t - t;
-        if k + 1 == steps.len() && s.last.text().trim().is_empty() {
-            break; // the program closed its screen: nothing to wait for
+        if k + 1 == steps.len() && (s.exited || s.last.text().trim().is_empty()) {
+            // the program ended, or closed its screen: nothing to wait for.
+            // what it left behind as it went (a line of its own, the shell's)
+            // is not there the next time
+            break;
         }
         push_sync(&mut out, before_of(*idx), after, &union(&s.volatile, quiet), gap, &seen, Some(step));
         seen.add(after);

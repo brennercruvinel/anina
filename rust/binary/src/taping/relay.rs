@@ -192,6 +192,7 @@ fn session(eng: &mut dyn Engine, opts: &Options) -> Result<Session> {
     let mut inputs: Vec<Input> = Vec::new();
     let mut resizes = Vec::new();
     let mut latest = eng.screen()?;
+    let mut exited = false;
     let mut drawn: Option<Screen> = None;
     let mut modes = Modes::new();
     // per stretch between inputs: how often each cell changed once the
@@ -280,6 +281,7 @@ fn session(eng: &mut dyn Engine, opts: &Options) -> Result<Session> {
             }
             if eng.exit_code()?.is_some() {
                 latest = eng.screen()?;
+                exited = true;
                 break;
             }
         }
@@ -308,6 +310,7 @@ fn session(eng: &mut dyn Engine, opts: &Options) -> Result<Session> {
         resizes,
         last: latest,
         end: now(),
+        exited,
         last_quiet: quiet,
         volatile,
     })
