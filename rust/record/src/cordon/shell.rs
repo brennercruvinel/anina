@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How the system words a refusal: `EPERM` under `sandbox-exec` (a write or
 /// a connection), `EROFS` under `bwrap` (a write outside the bound folders).
@@ -24,6 +24,11 @@ const REFUSALS: [&str; 2] = ["Operation not permitted", "Read-only file system"]
 
 /// How much of a line's stderr is kept to look for a refusal in.
 const KEPT: usize = 16 * 1024;
+
+/// How long a line that ended is still read when something it left behind
+/// holds its stderr open. A reader that got no turn on a busy machine has
+/// this long to hand over the refusal the line wrote before it ended.
+const LEFT_BEHIND: Duration = Duration::from_secs(1);
 
 /// One shell line, ready to run.
 pub struct Line<'a> {
@@ -126,8 +131,12 @@ impl Line<'_> {
                 Err(mpsc::RecvTimeoutError::Disconnected) => break child.wait()?,
             }
         };
-        // what was written just before the exit
-        while let Ok(chunk) = rx.recv_timeout(Duration::from_millis(50)) {
+        // what was written just before the exit: until the pipe closes, which
+        // is at once unless a process the line left behind holds it open
+        let until = Instant::now() + LEFT_BEHIND;
+        while let Some(left) = until.checked_duration_since(Instant::now())
+            && let Ok(chunk) = rx.recv_timeout(left)
+        {
             keep(chunk);
         }
         Ok((st, String::from_utf8_lossy(&kept).into_owned()))
@@ -198,13 +207,22 @@ mod tests {
     #[test]
     fn a_confined_line_that_fails_carries_the_note_and_does_not_wait_for_what_it_left_behind() {
         // `env` stands for the sandbox tool: the pipe, the note and the wait
-        // are the same. The sleep keeps stderr open after the line ended.
+        // are the same. The sleep keeps stderr open after the line ended, far
+        // longer than a busy machine takes to run the line.
         let wrap = Wrap { prefix: vec!["/usr/bin/env".into()], writable: vec![PathBuf::from("/r")], network: true };
-        let t0 = std::time::Instant::now();
-        let e = wrap.sh(&[], "sleep 4 & echo 'x: Operation not permitted' >&2; exit 1").run("Exec").unwrap_err();
-        assert!(t0.elapsed() < Duration::from_secs(3), "waited for the background process");
+        let dir = std::env::temp_dir().join(format!("anina-left-behind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = "sleep 30 & echo $! > pid; echo 'x: Operation not permitted' >&2; exit 1";
+        let t0 = Instant::now();
+        let e = wrap.sh(&[], script).cwd(&dir).run("Exec").unwrap_err();
+        let took = t0.elapsed();
+        // the sleeper goes with the test
+        let pid = std::fs::read_to_string(dir.join("pid")).unwrap();
+        assert!(Command::new("kill").arg(pid.trim()).status().unwrap().success(), "no sleeper {pid:?} to stop");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(took < Duration::from_secs(10), "waited for the background process: {took:?}");
         let e = e.to_string();
-        assert!(e.starts_with("Exec failed (exit status: 1): sleep 4 &"), "{e}");
+        assert!(e.starts_with("Exec failed (exit status: 1): sleep 30 &"), "{e}");
         assert!(
             e.ends_with(
                 "\nthe sandbox refused it: --sandbox strict allows writes only under the sandbox root (/r), and the network is on"
