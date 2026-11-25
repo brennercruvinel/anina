@@ -14,14 +14,16 @@
 //! (two blank cells, a box-drawing border or the row end), slides left or
 //! right so columns and borders beyond it stay where the program drew them.
 
+pub mod scope;
+
 use crate::engine::{Engine, Modes, Spec};
 use anina_screen::{Cell, Screen};
 use anyhow::{Context, Result};
 use regex::{Captures, Regex};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use unicode_width::UnicodeWidthChar;
 
 #[derive(Clone, Debug)]
@@ -37,7 +39,14 @@ pub struct Rule {
 #[derive(Clone, Debug, Default)]
 pub struct Redactor {
     pub rules: Vec<Rule>,
+    /// What these rules hid. A clone counts in the same place, so the
+    /// redactors a command makes from its scope's share one count.
+    seen: Seen,
 }
+
+/// What was hidden, by label: hashes of the distinct texts.
+#[derive(Clone, Debug, Default)]
+struct Seen(Arc<Mutex<BTreeMap<&'static str, HashSet<u64>>>>);
 
 /// Secret shapes worth hiding wherever they show up.
 const SECRETS: &[(&str, &str)] = &[
@@ -52,44 +61,6 @@ const SECRETS: &[(&str, &str)] = &[
         "${1}••••••••",
     ),
 ];
-
-/// The redactor every command starts from, built once by `init`.
-static STANDARD: OnceLock<Redactor> = OnceLock::new();
-
-/// What was hidden this run, by label: hashes of the distinct texts.
-static SEEN: LazyLock<Mutex<BTreeMap<&'static str, HashSet<u64>>>> = LazyLock::new(Default::default);
-
-/// The folders this command writes to. When it ends, worked or failed,
-/// `anina` checks what was written there: a failed wait leaves its screen
-/// in `failed.txt` too.
-static OUTPUTS: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Default::default);
-
-/// Note `dir` as a folder this command writes to, once it exists.
-pub fn writes_to(dir: &Path) {
-    if let Ok(mut v) = OUTPUTS.lock()
-        && !v.iter().any(|d| d == dir)
-    {
-        v.push(dir.to_path_buf());
-    }
-}
-
-/// The folders noted by `writes_to`, in order.
-pub fn outputs() -> Vec<PathBuf> {
-    OUTPUTS.lock().map(|v| v.clone()).unwrap_or_default()
-}
-
-/// Load the config files and this machine's identity once, so every
-/// `Redactor::defaults()` after it has them. A broken config is an error here,
-/// before anything runs.
-pub fn init() -> Result<()> {
-    let mut r = Redactor::default();
-    for path in config_paths() {
-        r.load_config(&path)?;
-    }
-    r.rules.extend(Redactor::identity().rules);
-    let _ = STANDARD.set(r);
-    Ok(())
-}
 
 /// `./anina.toml` and the user config, the ones that exist; `$ANINA_CONFIG`
 /// alone when set.
@@ -120,37 +91,33 @@ struct RedactConfig {
     mask: Vec<String>,
 }
 
-/// One line of what was hidden this run (`home path ×1, user name ×1`), if
-/// anything was.
-pub fn summary() -> Option<String> {
-    let seen = SEEN.lock().ok()?;
-    let parts: Vec<String> =
-        seen.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("{k} ×{}", v.len())).collect();
-    (!parts.is_empty()).then(|| parts.join(", "))
-}
-
-fn note(label: &'static str, text: &str) {
-    if label.is_empty() {
-        return;
-    }
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut h);
-    if let Ok(mut seen) = SEEN.lock() {
-        seen.entry(label).or_default().insert(h.finish());
+impl Seen {
+    fn note(&self, label: &'static str, text: &str) {
+        if label.is_empty() {
+            return;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut h);
+        if let Ok(mut seen) = self.0.lock() {
+            seen.entry(label).or_default().insert(h.finish());
+        }
     }
 }
 
 impl Redactor {
-    /// The rules every run gets: the config's, this machine's identity and
-    /// secret shapes.
-    pub fn defaults() -> Self {
-        Self::shared().clone()
+    /// One line of what these rules and their clones hid (`home path ×1,
+    /// user name ×1`), if anything.
+    pub fn summary(&self) -> Option<String> {
+        let seen = self.seen.0.lock().ok()?;
+        let parts: Vec<String> =
+            seen.iter().filter(|(_, v)| !v.is_empty()).map(|(k, v)| format!("{k} ×{}", v.len())).collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
     }
 
-    /// The same rules, borrowed: for redacting text as it is written.
-    pub fn shared() -> &'static Self {
-        STANDARD.get_or_init(Self::identity)
+    /// No rules yet, counted where these are: for the rules that go first.
+    pub fn blank(&self) -> Self {
+        Redactor { rules: Vec::new(), seen: self.seen.clone() }
     }
 
     /// This machine's identity and secret shapes, without any config.
@@ -249,7 +216,7 @@ impl Redactor {
                 .replace_all(&out, |caps: &Captures| {
                     let with = rule.replacement(caps);
                     if count && with != caps[0] {
-                        note(rule.label, &caps[0]);
+                        self.seen.note(rule.label, &caps[0]);
                     }
                     with
                 })
@@ -321,7 +288,7 @@ impl Redactor {
             // a row has few matches; cap the passes in case one keeps sliding into view
             for _ in 0..16 {
                 let (text, col_at) = row_map(screen.row(y));
-                let Some((start, end, with)) = rule.find(&text, &col_at, screen.row(y)) else { break };
+                let Some((start, end, with)) = rule.find(&text, &col_at, screen.row(y), &self.seen) else { break };
                 splice(screen, y, start, end, &with);
             }
         }
@@ -334,7 +301,7 @@ impl Redactor {
             for _ in 0..16 {
                 let cells: Vec<Cell> = (y0..=y1).flat_map(|y| screen.row(y).to_vec()).collect();
                 let (text, at) = row_map(&cells);
-                let Some((start, end, with)) = rule.find(&text, &at, &cells) else { break };
+                let Some((start, end, with)) = rule.find(&text, &at, &cells, &self.seen) else { break };
                 // `continues` guesses: a row that fills the width and is followed by
                 // text looks wrapped. A match inside one row is spliced in that row,
                 // so the rows after it never move up into a line they are not part of.
@@ -370,7 +337,7 @@ impl Rule {
     }
 
     /// The first match in `text` as a cell range and its replacement.
-    fn find(&self, text: &str, at: &[u16], cells: &[Cell]) -> Option<(usize, usize, String)> {
+    fn find(&self, text: &str, at: &[u16], cells: &[Cell], seen: &Seen) -> Option<(usize, usize, String)> {
         let caps = self.re.captures(text)?;
         let m = caps.get(0)?;
         if m.as_str().is_empty() {
@@ -380,7 +347,7 @@ impl Rule {
         if with == m.as_str() {
             return None;
         }
-        note(self.label, m.as_str());
+        seen.note(self.label, m.as_str());
         let start = at[m.start()] as usize;
         let last = at[m.end() - 1] as usize;
         Some((start, last + cell_width(&cells[last]), with))

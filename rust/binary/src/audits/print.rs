@@ -4,6 +4,7 @@
 use super::meter::{Outcome, Status};
 use super::ratio;
 use super::score::{Score, status_line};
+use anina_runner::redact::Redactor;
 use anina_screen::{Screen, attr};
 use anyhow::Result;
 use serde::Serialize;
@@ -21,20 +22,16 @@ pub struct Report<'a> {
     pub variants: &'a [Outcome],
 }
 
-pub fn write_json(r: &Report, path: &Path) -> Result<()> {
-    std::fs::write(path, anina_runner::redact::Redactor::shared().to_json(r)?)?;
+/// Write every number at `path`, its strings redacted by `red`.
+pub fn write_json(r: &Report, path: &Path, red: &Redactor) -> Result<()> {
+    std::fs::write(path, red.to_json(r)?)?;
     Ok(())
 }
 
-/// Redacted (a failure names the tape's path, an error the user's files)
-/// and HTML-escaped.
-fn esc(s: &str) -> String {
-    anina_runner::redact::Redactor::shared()
-        .text(s)
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+/// Redacted by `red` (a failure names the tape's path, an error the user's
+/// files) and HTML-escaped.
+fn esc(red: &Redactor, s: &str) -> String {
+    red.text(s).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 fn grade(score: Option<u8>) -> &'static str {
@@ -47,7 +44,7 @@ fn grade(score: Option<u8>) -> &'static str {
 }
 
 /// A screen as colored HTML, for when there is no PNG.
-pub fn screen_html(s: &Screen) -> String {
+pub fn screen_html(s: &Screen, red: &Redactor) -> String {
     let mut out = String::new();
     for y in 0..s.used_rows().max(1) {
         let mut x = 0;
@@ -82,15 +79,17 @@ pub fn screen_html(s: &Screen) -> String {
             if c.has(attr::UNDERLINE) {
                 css.push_str(";text-decoration:underline");
             }
-            let _ = write!(out, "<span style=\"{css}\">{}</span>", esc(&text));
+            let _ = write!(out, "<span style=\"{css}\">{}</span>", esc(red, &text));
         }
         out.push('\n');
     }
     out
 }
 
-/// Write the HTML report at `path`; with `embed`, the screenshots go inside it.
-pub fn write_html(r: &Report, path: &Path, embed: bool) -> Result<()> {
+/// Write the HTML report at `path`; with `embed`, the screenshots go inside
+/// it. Every text it shows goes through `red` first.
+pub fn write_html(r: &Report, path: &Path, embed: bool, red: &Redactor) -> Result<()> {
+    let esc = |s: &str| esc(red, s);
     let dir = path.parent().unwrap_or(Path::new("."));
     let mut h = String::new();
     let _ = write!(
@@ -194,7 +193,7 @@ th{{color:var(--dim);font-weight:600}}.chip{{display:inline-block;padding:1px 8p
                 anina_render::index::img_src(dir, p, embed),
                 esc(&o.variant.name)
             ),
-            (None, Some(s)) => format!("<pre class=\"term\">{}</pre>", screen_html(s)),
+            (None, Some(s)) => format!("<pre class=\"term\">{}</pre>", screen_html(s, red)),
             (None, None) => "<pre class=\"term\">(no screen)</pre>".into(),
         };
         let _ = write!(
@@ -349,7 +348,7 @@ mod tests {
         let all = outcomes();
         let scores = all_scores(&all);
         let dir = scratch("json");
-        write_json(&report(&scores, &all), &dir.join("report.json")).unwrap();
+        write_json(&report(&scores, &all), &dir.join("report.json"), &Redactor::identity()).unwrap();
         let text = std::fs::read_to_string(dir.join("report.json")).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -382,8 +381,9 @@ mod tests {
         let dir = scratch("html");
         std::fs::create_dir_all(dir.join("terminals/80x24-truecolor")).unwrap();
         std::fs::write(dir.join("terminals/80x24-truecolor/screen.png"), b"PNG!").unwrap();
+        let red = Redactor::identity();
         let page = |embed: bool| {
-            write_html(&report(&scores, &all), &dir.join("report.html"), embed).unwrap();
+            write_html(&report(&scores, &all), &dir.join("report.html"), embed, &red).unwrap();
             std::fs::read_to_string(dir.join("report.html")).unwrap()
         };
         let (html, embedded) = (page(false), page(true));
@@ -419,7 +419,7 @@ mod tests {
         let mark = |score: Option<u8>| Score { category: "stability", score, rule: "r", explain: Vec::new() };
         let scores: Vec<Score> = [Some(100), Some(90), Some(89), Some(50), Some(49), Some(0), None].map(mark).into();
         let dir = scratch("bands");
-        write_html(&report(&scores, &[]), &dir.join("report.html"), false).unwrap();
+        write_html(&report(&scores, &[]), &dir.join("report.html"), false, &Redactor::default()).unwrap();
         let html = std::fs::read_to_string(dir.join("report.html")).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         for (band, shown, filled) in [
@@ -449,7 +449,8 @@ mod tests {
             "<span style=\"color:#e5e5e5\">     </span>\n",
         );
         // the fourth row is empty and left out
-        assert_eq!(screen_html(&s), want);
-        assert_eq!(screen_html(&parse("", 4, 2)), "<span style=\"color:#e5e5e5\">    </span>\n");
+        let red = Redactor::default();
+        assert_eq!(screen_html(&s, &red), want);
+        assert_eq!(screen_html(&parse("", 4, 2), &red), "<span style=\"color:#e5e5e5\">    </span>\n");
     }
 }

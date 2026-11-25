@@ -9,6 +9,7 @@ pub mod print;
 pub mod relay;
 
 use anina_runner::engine::Spec;
+use anina_runner::redact::scope::Scope;
 use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 
@@ -40,7 +41,7 @@ pub struct Args {
     pub command: Vec<String>,
 }
 
-pub fn run(a: Args) -> Result<()> {
+pub fn run(a: Args, scope: &Scope) -> Result<()> {
     let stop = relay::stop_byte(&a.stop_key)?;
     let (tc, tr) = crossterm::terminal::size().unwrap_or((100, 30));
     let mut spec = Spec::new(a.command[0].clone(), a.command[1..].to_vec());
@@ -61,7 +62,7 @@ pub fn run(a: Args) -> Result<()> {
     let mut session = relay::run(relay::Options { spec, stop, follow_size })?;
     // the waits come from these screens; `anina record` redacts what it
     // reads, so a wait on the raw text would never match on replay
-    let red = anina_runner::redact::Redactor::defaults();
+    let red = scope.redactor();
     for i in &mut session.inputs {
         red.apply(&mut i.before);
     }

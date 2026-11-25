@@ -18,7 +18,7 @@ pub mod hints;
 use anina_record::cordon::{Mode, Sandbox};
 use anina_runner::engine::{self, Engine, Spec};
 use anina_runner::masker;
-use anina_runner::redact::{Redacted, Redactor};
+use anina_runner::redact::{Redacted, scope::Scope};
 use anina_screen::{Mask, Screen};
 use anyhow::{Result, anyhow, bail};
 use graph::{Edge, Graph, Launch, Skipped, State};
@@ -851,12 +851,12 @@ pub struct Args {
     pub command: Vec<String>,
 }
 
-pub fn run(a: Args) -> Result<()> {
+pub fn run(a: Args, scope: &Scope) -> Result<()> {
     let program = a.command[0].clone();
     let base =
         std::path::Path::new(&program).file_name().map_or("program".into(), |s| s.to_string_lossy().into_owned());
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("explore-{base}")));
-    anina_runner::redact::writes_to(&out);
+    scope.writes_to(&out);
     let mode: Mode = a.sandbox.parse()?;
     // like `anina run`: in the cache, emptied for every exploration
     let sb = match mode {
@@ -905,11 +905,11 @@ pub fn run(a: Args) -> Result<()> {
     let before = a.before.clone();
     // every screen is redacted as it is read: titles, the graph, the map and
     // the tape to a screen all see what may be written
-    let mut red = Redactor::default();
+    let mut red = scope.redactor().blank();
     for (p, w) in sb.as_ref().map(|s| s.redactions()).unwrap_or_default() {
         red.literal(&p, &w);
     }
-    red.rules.extend(Redactor::defaults().rules);
+    red.rules.extend(scope.redactor().rules.iter().cloned());
     let make: Factory = Box::new(move || {
         if let Some(cmd) = &before {
             wrap.sh(&[], cmd).run("--before")?;
@@ -930,7 +930,7 @@ pub fn run(a: Args) -> Result<()> {
         ..Default::default()
     };
     let g = Explorer::new(make, launch, set).run()?;
-    let pngs = g.write(&out)?;
+    let pngs = g.write(&out, scope.redactor())?;
     let exits = g.edges.iter().filter(|e| e.to.is_none()).count();
     eprintln!(
         "anina explore: {} screens, {} transitions, {} ways out, {} skipped in {:.0} s ({} restarts){}",
@@ -942,7 +942,7 @@ pub fn run(a: Args) -> Result<()> {
         g.restarts,
         if g.complete { "" } else { "; stopped by a budget" }
     );
-    if let Some(r) = anina_runner::redact::summary() {
+    if let Some(r) = scope.redactor().summary() {
         eprintln!("anina explore: redacted {r}");
     }
     eprintln!("anina explore: map -> {}", anina_screen::lesson::shown(&out.join("map.md")));

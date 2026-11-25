@@ -14,7 +14,7 @@ pub mod specs;
 use crate::cordon::diffs::{Differ, Snapshot};
 use crate::cordon::{Mode, Sandbox};
 use crate::{Config, Options};
-use anina_runner::redact::Redactor;
+use anina_runner::redact::{Redactor, scope::Scope};
 use anina_runner::script::{Tape, expand};
 use anyhow::{Context, Result, anyhow, bail};
 use include_dir::{Dir, include_dir};
@@ -233,8 +233,8 @@ pub struct StageArgs<'a> {
 }
 
 impl Stage {
-    /// Stage the preset `load` returned.
-    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs) -> Result<Stage> {
+    /// Stage the preset `load` returned; its redaction counts in `scope`.
+    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs, scope: &Scope) -> Result<Stage> {
         let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
 
         // what the machine must have
@@ -274,7 +274,7 @@ impl Stage {
 
         // redaction: the sandbox paths first (they may sit under the real home),
         // then the preset's and the command line's rules, then the defaults
-        let mut red = Redactor::default();
+        let mut red = scope.redactor().blank();
         for (p, w) in sb.redactions() {
             red.literal(&p, &w);
         }
@@ -285,7 +285,7 @@ impl Stage {
             let (p, w) = kv.rsplit_once('=').ok_or_else(|| anyhow!("--redact takes REGEX=REPLACEMENT"))?;
             red.push(p, w)?;
         }
-        red.rules.extend(Redactor::defaults().rules);
+        red.rules.extend(scope.redactor().rules.iter().cloned());
 
         // prepare: clones, builds, installs; cached by `creates`. Under strict
         // it writes the cache too, where clones and builds are kept (ADR-0006)
@@ -525,27 +525,24 @@ fn writable(dir: &Path) {
 }
 
 /// Run a preset; returns the output directory.
-pub fn run(a: Args) -> Result<PathBuf> {
+pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
     let (dir, m) = load(&a.preset)?;
     // picked before any work: a wrong --part fails here
     let parts: Vec<specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
-    anina_runner::redact::writes_to(&out);
+    scope.writes_to(&out);
     let started = Instant::now();
-    let stage = Stage::new(
-        dir,
-        m,
-        &StageArgs {
-            out: &out,
-            sandbox: a.sandbox.as_deref(),
-            vars: &a.vars,
-            redact: &a.redact,
-            keep: a.keep,
-            slot: None,
-        },
-    )?;
+    let args = StageArgs {
+        out: &out,
+        sandbox: a.sandbox.as_deref(),
+        vars: &a.vars,
+        redact: &a.redact,
+        keep: a.keep,
+        slot: None,
+    };
+    let stage = Stage::new(dir, m, &args, scope)?;
     let (m, sb, red) = (&stage.manifest, &stage.sandbox, &stage.red);
     let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
 
@@ -628,8 +625,8 @@ pub fn run(a: Args) -> Result<PathBuf> {
         changes: changes.summary(),
     };
     std::fs::write(out.join("run.json"), red.to_json(&run)?)?;
-    print::write_index(&out, &run, a.embed)?;
-    if let Some(r) = anina_runner::redact::summary() {
+    print::write_index(&out, &run, a.embed, scope.redactor())?;
+    if let Some(r) = scope.redactor().summary() {
         say(format!("redacted {r}"));
     }
     say(format!("-> {}", anina_screen::lesson::shown(&out.join("index.html"))));

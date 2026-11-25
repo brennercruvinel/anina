@@ -16,7 +16,7 @@ pub mod score;
 use anina_record::preset::{Stage, StageArgs};
 use anina_record::{self as record, Config, Options};
 use anina_runner::engine::{self, Spec};
-use anina_runner::redact::Redactor;
+use anina_runner::redact::scope::Scope;
 use anina_runner::script::{Line, Step, Tape};
 use anyhow::{Result, anyhow, bail};
 use regex::Regex;
@@ -70,9 +70,9 @@ pub struct Args {
     pub vars: Vec<String>,
 }
 
-pub fn run(a: Args) -> Result<()> {
+pub fn run(a: Args, scope: &Scope) -> Result<()> {
     if let Some(p) = &a.preset {
-        return run_preset(&a, p);
+        return run_preset(&a, p, scope);
     }
     let (name, target) = match (&a.tape, a.command.first()) {
         (Some(t), _) => {
@@ -85,7 +85,7 @@ pub fn run(a: Args) -> Result<()> {
     };
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("audit-{name}")));
     std::fs::create_dir_all(&out)?;
-    anina_runner::redact::writes_to(&out);
+    scope.writes_to(&out);
 
     let tape = match &a.tape {
         Some(path) => {
@@ -105,11 +105,11 @@ pub fn run(a: Args) -> Result<()> {
             tape
         }
     };
-    audit(&a, &tape, &target, &out, None)
+    audit(&a, &tape, &target, &out, None, scope)
 }
 
 /// Audit every part of a preset (or `--part`), one report per part.
-fn run_preset(a: &Args, preset: &str) -> Result<()> {
+fn run_preset(a: &Args, preset: &str, scope: &Scope) -> Result<()> {
     let (dir, m) = anina_record::preset::load(preset)?;
     // picked before any work: a wrong --part fails here
     let parts: Vec<anina_record::preset::specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
@@ -117,7 +117,7 @@ fn run_preset(a: &Args, preset: &str) -> Result<()> {
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(format!("audit-{name}")));
     std::fs::create_dir_all(&out)?;
     let out = std::fs::canonicalize(&out)?;
-    anina_runner::redact::writes_to(&out);
+    scope.writes_to(&out);
     let slot = format!("audit-{name}");
     let stage = Stage::new(
         dir,
@@ -130,6 +130,7 @@ fn run_preset(a: &Args, preset: &str) -> Result<()> {
             keep: false,
             slot: Some(&slot),
         },
+        scope,
     )?;
     stage.freeze()?;
     for part in &parts {
@@ -142,14 +143,15 @@ fn run_preset(a: &Args, preset: &str) -> Result<()> {
         std::fs::create_dir_all(&pout)?;
         let tape = stage.tape(part, &pout)?;
         eprintln!("anina [{name}] auditing part {} · {}", part.name, Stage::title(part));
-        audit(a, &tape, &format!("{name} · {}", part.name), &pout, Some(&stage))?;
+        audit(a, &tape, &format!("{name} · {}", part.name), &pout, Some(&stage), scope)?;
     }
     Ok(())
 }
 
 /// Play `tape` in every terminal of the matrix, score it, write the report.
 /// With a stage, each terminal runs in the preset's sandbox, restored first.
-fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>) -> Result<()> {
+fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>, scope: &Scope) -> Result<()> {
+    let red = scope.redactor();
     let sizes = cases::parse_sizes(&a.sizes)?;
     let variants = cases::variants(&sizes, a.quick, a.full);
     let mut outcomes = Vec::new();
@@ -161,7 +163,7 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>)
             engine: a.engine.clone(),
             out_dir: dir.clone(),
             force: v.force(a.fps),
-            redactor: Some(stage.map_or_else(Redactor::defaults, |st| st.red.clone())),
+            redactor: Some(stage.map_or(red, |st| &st.red).clone()),
             png: false,
             quiet: true,
         };
@@ -207,10 +209,10 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>)
         scores: &scores,
         variants: &outcomes,
     };
-    print::write_json(&rep, &out.join("report.json"))?;
-    print::write_html(&rep, &out.join("report.html"), a.embed)?;
-    print!("{}", Redactor::shared().quiet(&print::summary(&rep)));
-    if let Some(r) = anina_runner::redact::summary() {
+    print::write_json(&rep, &out.join("report.json"), red)?;
+    print::write_html(&rep, &out.join("report.html"), a.embed, red)?;
+    print!("{}", red.quiet(&print::summary(&rep)));
+    if let Some(r) = red.summary() {
         eprintln!("\nanina: redacted {r}");
     }
     eprintln!("\nanina: report -> {}", anina_screen::lesson::shown(&out.join("report.html")));

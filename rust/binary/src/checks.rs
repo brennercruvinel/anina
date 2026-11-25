@@ -7,6 +7,7 @@
 
 use anina_render::png::{PNG_SIGNATURE, png_text};
 use anina_runner::redact::Redactor;
+use anina_runner::redact::scope::Scope;
 use anyhow::{Result, bail};
 use regex::Regex;
 use std::io::Read;
@@ -32,9 +33,9 @@ pub struct Finding {
     pub context: String,
 }
 
-pub fn run(a: Args) -> Result<()> {
+pub fn run(a: Args, scope: &Scope) -> Result<()> {
     let paths = if a.paths.is_empty() { vec![PathBuf::from("anina-out")] } else { a.paths };
-    check(&paths)
+    check_since(&paths, None, scope.redactor())
 }
 
 /// When the command started: `verify` checks what was written since.
@@ -46,21 +47,17 @@ pub fn mark_start() {
 }
 
 /// Check what a command just wrote, worked or failed: the files under the
-/// folders it noted (`redact::writes_to`) written since `mark_start`, not a
+/// folders it noted (`Scope::writes_to`) written since `mark_start`, not a
 /// note the user keeps there or what an earlier run left (`anina check`
 /// reads those).
-pub fn verify_written() -> Result<()> {
-    let outs: Vec<PathBuf> = anina_runner::redact::outputs().into_iter().filter(|d| d.exists()).collect();
+pub fn verify_written(scope: &Scope) -> Result<()> {
+    let outs: Vec<PathBuf> = scope.outputs().into_iter().filter(|d| d.exists()).collect();
     if outs.is_empty() {
         return Ok(());
     }
     // a little before the start: some file systems keep whole seconds
     let since = STARTED.get().map(|t| *t - Duration::from_secs(2));
-    check_since(&outs, since)
-}
-
-fn check(paths: &[PathBuf]) -> Result<()> {
-    check_since(paths, None)
+    check_since(&outs, since, scope.redactor())
 }
 
 /// Did the file change since `since`? By its status-change time (ctime),
@@ -76,8 +73,9 @@ fn written_since(f: &Path, since: Option<SystemTime>) -> bool {
     changed >= t
 }
 
-fn check_since(paths: &[PathBuf], since: Option<SystemTime>) -> Result<()> {
-    let red = Redactor::shared();
+/// Look through `paths` (the files written since `since`, when given) for
+/// what `red` would hide.
+fn check_since(paths: &[PathBuf], since: Option<SystemTime>, red: &Redactor) -> Result<()> {
     let (mut files, mut pngs, mut blind, mut skipped, mut found) = (0, 0, 0, 0, Vec::new());
     for p in paths {
         if !p.exists() {

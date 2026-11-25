@@ -6,7 +6,9 @@ mod versus;
 
 use anina_record::{self as record, preset};
 use anina_render::{self as render, brand};
-use anina_runner::{engine, redact};
+use anina_runner::engine;
+use anina_runner::redact::Redactor;
+use anina_runner::redact::scope::Scope;
 use anina_screen::{self as screen, frames};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -55,30 +57,38 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    let ran = dispatch(cli.cmd);
+    checks::mark_start();
+    // the one scope of this command: what it hides, what it hid, where it
+    // wrote. A config that does not load is the command's error, and the
+    // terminal still hides who and where this is.
+    let (scope, ran) = match Scope::load() {
+        Ok(scope) => {
+            let ran = dispatch(cli.cmd, &scope);
+            (scope, ran)
+        }
+        Err(e) => (Scope::of(Redactor::identity()), Err(e)),
+    };
     // what the command wrote is checked whether it worked or not: a failed
     // wait leaves its screen in failed.txt and failed.ansi
-    let checked = checks::verify_written();
+    let checked = checks::verify_written(&scope);
     let failed: Vec<anyhow::Error> = [ran.err(), checked.err()].into_iter().flatten().collect();
     for e in &failed {
-        eprintln!("anina: {}", redact::Redactor::shared().quiet(&format!("{e:#}")));
+        eprintln!("anina: {}", scope.redactor().quiet(&format!("{e:#}")));
     }
     if !failed.is_empty() {
         std::process::exit(1);
     }
 }
 
-fn dispatch(cmd: Cmd) -> Result<()> {
-    checks::mark_start();
-    redact::init()?;
+fn dispatch(cmd: Cmd, scope: &Scope) -> Result<()> {
     match cmd {
-        Cmd::Run(a) => preset::run(a).map(|_| ()),
+        Cmd::Run(a) => preset::run(a, scope).map(|_| ()),
         Cmd::Presets => preset::list(),
-        Cmd::Record(a) => record::run(a).map(|_| ()),
+        Cmd::Record(a) => record::run(a, scope).map(|_| ()),
         Cmd::Render(a) => render::run(a),
-        Cmd::Explore(a) => mapper::run(a),
-        Cmd::Init(a) => taping::run(a),
-        Cmd::Audit(a) => audits::run(a),
+        Cmd::Explore(a) => mapper::run(a, scope),
+        Cmd::Init(a) => taping::run(a, scope),
+        Cmd::Audit(a) => audits::run(a, scope),
         Cmd::Brand(a) => brand::run(a),
         Cmd::Export { cast, out } => {
             let c = frames::Cast::load(&cast)?;
@@ -93,7 +103,7 @@ fn dispatch(cmd: Cmd) -> Result<()> {
             eprintln!("anina: asciicast v3 -> {}", screen::lesson::shown(&out));
             Ok(())
         }
-        Cmd::Check(a) => checks::run(a),
+        Cmd::Check(a) => checks::run(a, scope),
         Cmd::Compare(a) => versus::run(a),
         Cmd::Doctor => doctor(),
     }

@@ -8,6 +8,7 @@ pub mod preset;
 
 use anina_runner::engine::{self, Engine, Modes, Spec};
 use anina_runner::redact::Redactor;
+use anina_runner::redact::scope::Scope;
 use anina_runner::script::{Step, Tape};
 use anina_screen::frames::{Cast, Frame, now_iso};
 use anina_screen::{Pattern, Screen};
@@ -530,11 +531,11 @@ pub struct Args {
 }
 
 /// Record a tape; returns the output directory.
-pub fn run(a: Args) -> Result<PathBuf> {
+pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
     let name = a.tape.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned());
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
     std::fs::create_dir_all(&out)?;
-    anina_runner::redact::writes_to(&out);
+    scope.writes_to(&out);
     let mut vars = anina_runner::script::base_vars(&a.tape, &out);
     for kv in &a.vars {
         let (k, v) = kv.split_once('=').ok_or_else(|| anyhow!("--var takes K=V"))?;
@@ -547,7 +548,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
     let opts = Options {
         engine: a.engine.clone(),
         out_dir: out.clone(),
-        redactor: Some(Redactor::defaults()),
+        redactor: Some(scope.redactor().clone()),
         png: true,
         ..Default::default()
     };
@@ -563,7 +564,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
         rec.cast.screens.len(),
         anina_screen::lesson::shown(&cast_path)
     );
-    if let Some(r) = anina_runner::redact::summary() {
+    if let Some(r) = scope.redactor().summary() {
         eprintln!("anina: redacted {r}");
     }
     for o in tape.outputs() {
