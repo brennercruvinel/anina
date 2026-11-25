@@ -5,7 +5,7 @@
 ## Gates
 
 - [ ] `tool/tasks/fullcheck.sh` passes (fmt, clippy, test, doctor, selfcheck, deny, package)
-- [ ] what anina records changed on purpose: `tool/tasks/selfcheck.sh --update` ran on macOS and on Linux, and both references are here
+- [ ] both references in `tool/tests/shell` are recorded again (`tool/tasks/selfcheck.sh --update`, on macOS and on Linux), if what anina records changed on purpose
 - [ ] no crate depends on a layer above it
 - [ ] a new decision has an ADR in `docs/adr`
 - [ ] `docs/CHANGELOG` has a line, if users see the change

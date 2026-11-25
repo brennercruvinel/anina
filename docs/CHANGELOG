@@ -35,6 +35,7 @@
 
 ### Changed
 
+- CI (`gatecheck`) runs `tool/tasks/fullcheck.sh` itself, so a developer and CI pass the same gates from one list: fmt, clippy, test, doctor, selfcheck, deny, package. `cargo deny check` and the self-check are new in CI. Beside it stand `cargo check` on Rust 1.90 (the `rust-version` of the manifest), the release build, and a coverage summary on each run. The workflow's token only reads the repository, and every action is pinned by commit.
 - Under `--sandbox strict` the network is off unless the preset says `network = true`, the loopback included. The field was only printed by `anina presets`. `explore --sandbox strict` has no preset and so no network. The presets that need it (`astro`, `burn`, `urna`) already declare it.
 - The run's part line reads `part 1/1 edit · title` (a middle dot instead of a dash), so the output pastes into docs as is.
 - One crate became a workspace of five under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary. Commands, flags and output are the same. The split first carried four more crates with no code (`anina-codecs`, `anina-design`, `anina-motion`, `anina-recode`); they are gone, and a crate comes back the day its first line is written.
