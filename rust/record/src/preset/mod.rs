@@ -116,8 +116,8 @@ pub fn load(name: &str) -> Result<(PathBuf, Manifest)> {
     Ok((dir, m))
 }
 
-/// A built-in folder is a preset only with its manifest; `demo/` also keeps
-/// empty folders for presets still to come.
+/// A built-in folder is a preset only with its manifest, the same rule a
+/// folder on disk follows.
 fn is_builtin(d: &Dir) -> bool {
     d.get_file(d.path().join("preset.toml")).is_some()
 }

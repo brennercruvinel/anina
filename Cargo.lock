@@ -61,22 +61,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anina-codecs"
-version = "0.1.0"
-
-[[package]]
-name = "anina-design"
-version = "0.1.0"
-
-[[package]]
-name = "anina-motion"
-version = "0.1.0"
-
-[[package]]
-name = "anina-recode"
-version = "0.1.0"
-
-[[package]]
 name = "anina-record"
 version = "0.1.0"
 dependencies = [

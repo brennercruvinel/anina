@@ -112,7 +112,7 @@ anina waits on what the screen shows, never on the clock. Cells that change by t
 
 The SVG is one looping timeline with an embedded subset of JetBrains Mono, so it looks the same everywhere, `<img>` on GitHub included. PNGs come from the same SVG through resvg, no browser.
 
-The code is a workspace of nine crates in [`rust/`](rust), layered from the screen up to the binary. The crates `codecs`, `design`, `motion` and `recode` are still empty. They hold what comes next: a design system read from the screen, a timeline lighter than a GIF, and the tree rewritten for another framework. The reasons behind each choice are in [`docs/adr/`](docs/adr).
+The code is a workspace of five crates in [`rust/`](rust), layered from the screen up to the binary: `screen`, then `runner` and `render`, then `record`, then `binary`. The reasons behind each choice are in [`docs/adr/`](docs/adr).
 
 ## Limits
 
