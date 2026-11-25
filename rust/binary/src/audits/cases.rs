@@ -130,3 +130,124 @@ pub fn variants(sizes: &[(u16, u16)], quick: bool, full: bool) -> Vec<Variant> {
     v.push(Variant::new(bc, br, Colors::Truecolor, Locale::C));
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(v: &[Variant]) -> Vec<&str> {
+        v.iter().map(|x| x.name.as_str()).collect()
+    }
+
+    /// How many of size, colors and locale differ between two terminals.
+    fn axes_apart(a: &Variant, b: &Variant) -> usize {
+        [(a.cols, a.rows) != (b.cols, b.rows), a.colors != b.colors, a.locale != b.locale]
+            .iter()
+            .filter(|d| **d)
+            .count()
+    }
+
+    #[test]
+    fn the_default_matrix_moves_one_axis_at_a_time_from_the_baseline() {
+        let v = variants(&[], false, false);
+        assert_eq!(
+            names(&v),
+            [
+                "120x40-truecolor",
+                "80x24-truecolor",
+                "60x20-truecolor",
+                "120x40-256",
+                "120x40-16",
+                "120x40-nocolor",
+                "120x40-truecolor-C"
+            ]
+        );
+        // the baseline is first, alone, a roomy truecolor terminal in the host's locale
+        assert_eq!(v.iter().map(|x| x.baseline).collect::<Vec<_>>(), [true, false, false, false, false, false, false]);
+        assert_eq!((v[0].cols, v[0].rows, v[0].colors, v[0].locale), (120, 40, Colors::Truecolor, Locale::Host));
+        for x in &v[1..] {
+            assert_eq!(axes_apart(&v[0], x), 1, "{}", x.name);
+        }
+    }
+
+    #[test]
+    fn sizes_given_replace_the_two_usual_ones() {
+        let v = variants(&[(100, 30), (40, 10)], false, false);
+        assert_eq!(names(&v)[..3], ["120x40-truecolor", "100x30-truecolor", "40x10-truecolor"]);
+        assert_eq!(v.len(), 7);
+        // the baseline's own size is not run twice
+        let v = variants(&[(120, 40)], false, false);
+        assert_eq!(names(&v), ["120x40-truecolor", "120x40-256", "120x40-16", "120x40-nocolor", "120x40-truecolor-C"]);
+    }
+
+    #[test]
+    fn quick_keeps_the_baseline_the_smallest_size_no_color_and_16_colors() {
+        assert_eq!(
+            names(&variants(&[], true, false)),
+            ["120x40-truecolor", "60x20-truecolor", "120x40-nocolor", "120x40-16"]
+        );
+        // the smallest by area, wherever it sits in the list
+        let v = variants(&[(200, 10), (40, 30), (90, 30)], true, false);
+        assert_eq!(names(&v)[1], "40x30-truecolor");
+        assert!(v[0].baseline && v[1..].iter().all(|x| !x.baseline));
+    }
+
+    #[test]
+    fn full_is_every_size_with_every_color_depth_and_locale() {
+        let v = variants(&[], false, true);
+        // 3 sizes x 4 color depths x 2 locales, the baseline counted once and first
+        assert_eq!(v.len(), 24);
+        assert_eq!(v[0].name, "120x40-truecolor");
+        assert_eq!(v.iter().filter(|x| x.baseline).count(), 1);
+        let mut seen: Vec<&str> = names(&v);
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 24, "a terminal is listed twice");
+        for size in [(120, 40), (80, 24), (60, 20)] {
+            for colors in [Colors::Truecolor, Colors::C256, Colors::C16, Colors::NoColor] {
+                for locale in [Locale::Host, Locale::C] {
+                    let n = v.iter().filter(|x| ((x.cols, x.rows), x.colors, x.locale) == (size, colors, locale));
+                    assert_eq!(n.count(), 1, "{size:?} {colors:?} {locale:?}");
+                }
+            }
+        }
+        assert_eq!(variants(&[(120, 40), (80, 24)], false, true).len(), 16);
+    }
+
+    #[test]
+    fn a_terminal_announces_its_colors_and_locale_through_the_environment() {
+        let all = variants(&[], false, true);
+        let env = |name: &str| all.iter().find(|x| x.name == name).map(Variant::env).expect(name);
+        // an empty value is how a variable is unset
+        assert_eq!(env("120x40-truecolor"), ["TERM=xterm-256color", "COLORTERM=truecolor", "NO_COLOR="]);
+        assert_eq!(env("120x40-256"), ["TERM=xterm-256color", "COLORTERM=", "NO_COLOR="]);
+        assert_eq!(env("120x40-16"), ["TERM=xterm", "COLORTERM=", "NO_COLOR="]);
+        assert_eq!(env("120x40-nocolor"), ["TERM=xterm-256color", "COLORTERM=truecolor", "NO_COLOR=1"]);
+        assert_eq!(env("80x24-16-C"), ["TERM=xterm", "COLORTERM=", "NO_COLOR=", "LANG=C", "LC_ALL=C", "LC_CTYPE=C"]);
+    }
+
+    #[test]
+    fn a_terminal_forces_its_size_rate_and_environment_on_the_recorder() {
+        let v = variants(&[], false, false);
+        let small = &v[2];
+        let want: Vec<(String, Vec<String>)> = vec![
+            ("cols".into(), vec!["60".into()]),
+            ("rows".into(), vec!["20".into()]),
+            ("fps".into(), vec!["60".into()]),
+            ("env".into(), small.env()),
+        ];
+        assert_eq!(small.force(60.0), want);
+    }
+
+    #[test]
+    fn sizes_are_read_as_cols_x_rows() {
+        let parse = |list: &[&str]| parse_sizes(&list.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(parse(&["80x24", "100X30", " 132x43 "]).unwrap(), [(80, 24), (100, 30), (132, 43)]);
+        assert_eq!(parse(&[]).unwrap(), []);
+        let err = parse(&["80"]).unwrap_err().to_string();
+        assert!(err.contains("\"80\"") && err.contains("COLSxROWS"), "{err}");
+        for bad in ["x24", "80x", "wide x tall", "80x24x2", "70000x24", "-80x24"] {
+            assert!(parse(&[bad]).is_err(), "{bad:?} was read as a size");
+        }
+    }
+}
