@@ -1,4 +1,0 @@
-The Linux reference of the shell preset is not recorded yet.
-On Linux, run `tool/tasks/selfcheck.sh --update` and commit this folder:
-the run takes the place of this file. Until then the self-check plays the
-preset on Linux, warns that nothing was compared, and passes.
