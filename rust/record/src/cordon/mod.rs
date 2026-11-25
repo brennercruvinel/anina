@@ -77,6 +77,32 @@ impl Wrap {
     }
 }
 
+/// Whether no component of `path` (a real path when it was taken) is a link
+/// now, as far as the path exists.
+fn plain(path: &Path) -> bool {
+    let there = path.ancestors().find(|p| std::fs::symlink_metadata(p).is_ok());
+    there.is_none_or(|p| std::fs::canonicalize(p).is_ok_and(|real| real == p))
+}
+
+/// Where the sandbox `name` lives in anina's `cache`: `CACHE/sandbox/NAME`,
+/// as the system names it. The cache may be a link (one kept on another
+/// disk). Below it nothing may lead away, neither a link nor the name (`..`,
+/// a path from `/`), and that is settled before anina empties or fills the
+/// folder: a `prepare` writes the cache, and an earlier one may have left a
+/// link there.
+pub fn place(cache: &Path, name: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(cache).with_context(|| format!("creating {}", cache.display()))?;
+    let held = std::fs::canonicalize(cache)?.join("sandbox");
+    let root = held.join(name);
+    if root == held || !root.starts_with(&held) || !plain(&root) {
+        bail!(
+            "{} is not a folder of its own in anina's cache: a symbolic link or the name leads elsewhere",
+            root.display()
+        );
+    }
+    Ok(root)
+}
+
 impl Sandbox {
     /// Create (or reuse) the sandbox directories under `root`.
     pub fn new(root: &Path, mode: Mode) -> Result<Sandbox> {
@@ -99,6 +125,24 @@ impl Sandbox {
             sb.check_tool()?;
         }
         Ok(sb)
+    }
+
+    /// After lines that could write around the root (`who`: a preset's
+    /// `prepare` writes the cache the root lives in), the root is still the
+    /// folder `new` made, and no link stands on the way to `beside`, what
+    /// anina keeps next to it. anina is not confined: it would follow a link
+    /// wherever it points.
+    pub fn still_in_place(&self, who: &str, beside: &[PathBuf]) -> Result<()> {
+        if !plain(&self.root) || !self.root.is_dir() {
+            bail!(
+                "{who} moved the sandbox root or put a link in its path: {} is no longer the folder anina made",
+                self.root.display()
+            );
+        }
+        if let Some(p) = beside.iter().find(|p| !plain(p)) {
+            bail!("{who} put a link in the path of {}, which anina keeps beside the sandbox root", p.display());
+        }
+        Ok(())
     }
 
     fn xdg(&self) -> [(&'static str, PathBuf); 4] {

@@ -862,7 +862,7 @@ pub fn run(a: Args) -> Result<()> {
     let sb = match mode {
         Mode::Off => None,
         _ => {
-            let root = anina_record::preset::cache_dir().join("sandbox").join(format!("explore-{base}"));
+            let root = anina_record::cordon::place(&anina_record::preset::cache_dir(), &format!("explore-{base}"))?;
             if root.exists() {
                 std::fs::remove_dir_all(&root)?;
             }

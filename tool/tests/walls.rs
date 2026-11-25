@@ -271,7 +271,8 @@ fn anina_run_keeps_prepare_inside_the_root_and_the_cache() {
     let outside = dir.join("out.txt");
     let kept = dir.join("cache/kept.txt");
     // in the cache, where a preset keeps its clones and builds
-    let cached = "[[prepare]]\nabout = \"keep a build\"\nrun = \"echo built > \\\"$ANINA_CACHE/kept.txt\\\"\"\n";
+    let cached = "[[prepare]]\nabout = \"keep a build\"\nrun = \"mkdir -p \\\"$ANINA_CACHE/build\\\" && \
+                  echo built > \\\"$ANINA_CACHE/kept.txt\\\"\"\n";
     let escape = "[[prepare]]\nabout = \"write elsewhere\"\nrun = \"echo x > \\\"$ELSEWHERE\\\"\"\n";
 
     let p = preset(&dir, &format!("{cached}{escape}"), PROGRAM);
@@ -292,6 +293,65 @@ fn anina_run_keeps_prepare_inside_the_root_and_the_cache() {
     let o = run(&dir, &p, &["--sandbox", "strict"]);
     assert!(!o.status.success(), "{}", stderr(&o));
     assert!(!stolen.exists(), "an Exec wrote the cache");
+}
+
+/// How it ends when a `prepare` moves the folder that holds the root: what
+/// that run says, and the next one. `sandbox-exec` refuses the move, both
+/// times. Under `bwrap` the root is a mount point and the folder that holds
+/// it is not: the move works, anina finds the link when `prepare` is done,
+/// and the next run finds it before it starts.
+#[cfg(target_os = "macos")]
+const MOVED: [&str; 2] = ["the sandbox refused it"; 2];
+#[cfg(target_os = "linux")]
+const MOVED: [&str; 2] = FOUND;
+const FOUND: [&str; 2] =
+    ["prepare moved the sandbox root or put a link in its path", "a symbolic link or the name leads elsewhere"];
+
+#[test]
+fn anina_run_follows_no_link_that_prepare_left_in_the_cache() {
+    if !walls() {
+        return;
+    }
+    let elsewhere = |dir: &Path| format!("ELSEWHERE={}", dir.join("elsewhere").display());
+    // the cache is prepare's to write and the root lives in it: move the
+    // folder that holds the root, and a link fits in its place
+    let swap = "[[prepare]]\nabout = \"swap\"\nrun = 'mv \"$ANINA_CACHE/sandbox\" \"$ANINA_CACHE/gone\" && \
+                ln -s \"$ELSEWHERE\" \"$ANINA_CACHE/sandbox\"'\n";
+    // under strict, then under env, where nothing refuses the move
+    for (name, mode, whys) in [("moved", "strict", MOVED), ("moved-env", "env", FOUND)] {
+        let dir = scratch(name);
+        std::fs::create_dir_all(dir.join("elsewhere")).unwrap();
+        let p = preset(&dir, swap, PROGRAM);
+        // twice: a link that stayed is there when the next run makes its root
+        for why in whys {
+            let o = run(&dir, &p, &["--sandbox", mode, "--var", &elsewhere(&dir)]);
+            let said = stderr(&o);
+            // anina is not confined: through the link it would make its folders out there
+            let made = std::fs::read_dir(dir.join("elsewhere")).unwrap().count();
+            assert_eq!(made, 0, "{mode}: anina went through the link: {said}");
+            assert!(!o.status.success(), "{mode}: {said}");
+            assert!(said.contains(why), "{mode}: {said}");
+        }
+    }
+
+    // the copy anina keeps beside the sandboxes, and removes on its way out:
+    // through a link there, the folder of that name out there would go
+    let dir = scratch("saved");
+    let mine = dir.join("elsewhere/walls/mine.txt");
+    std::fs::create_dir_all(mine.parent().unwrap()).unwrap();
+    std::fs::write(&mine, "mine").unwrap();
+    let link = "[[prepare]]\nabout = \"link\"\nrun = 'ln -s \"$ELSEWHERE\" \"$ANINA_CACHE/pristine\"'\n";
+    let o = run(&dir, &preset(&dir, link, PROGRAM), &["--sandbox", "strict", "--var", &elsewhere(&dir)]);
+    let said = stderr(&o);
+    assert!(!o.status.success(), "{said}");
+    assert!(said.contains("prepare put a link in the path of"), "{said}");
+    assert!(mine.exists(), "anina removed a folder through the link: {said}");
+
+    // and a name that leaves the cache is no sandbox's place
+    for name in ["../../elsewhere/walls", &dir.join("elsewhere/walls").display().to_string(), ""] {
+        let e = anina_record::cordon::place(&dir.join("cache"), name).unwrap_err().to_string();
+        assert!(e.ends_with(FOUND[1]), "{name:?}: {e}");
+    }
 }
 
 #[test]

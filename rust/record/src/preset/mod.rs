@@ -251,7 +251,7 @@ impl Stage {
         // the sandbox, empty unless keep
         let mode: Mode = a.sandbox.or(m.sandbox.as_deref()).unwrap_or("env").parse()?;
         // in the cache, not in the output: installs weigh hundreds of MB
-        let root = cache_dir().join("sandbox").join(a.slot.unwrap_or(&m.name));
+        let root = crate::cordon::place(&cache_dir(), a.slot.unwrap_or(&m.name))?;
         if !a.keep && root.exists() {
             remove_tree(&root).with_context(|| format!("emptying {}", root.display()))?;
         }
@@ -307,6 +307,8 @@ impl Stage {
             say(format!("{label}…"));
             prepares.sh(&[], &p.run).cwd(a.out).envs(&vars).run(&label)?;
         }
+        // before anina goes back to the root or to its saved copy
+        sb.still_in_place("prepare", &[pristine_of(&sb.root)])?;
 
         let theme = m.theme.as_ref().map(|t| dir.join(t).display().to_string()).unwrap_or_default();
         Ok(Stage {
