@@ -1,5 +1,6 @@
 mod audits;
 mod checks;
+mod ending;
 mod mapper;
 mod taping;
 mod versus;
@@ -13,6 +14,7 @@ use anina_screen::notice::Notice;
 use anina_screen::{self as screen, frames};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use ending::Ending;
 use std::path::PathBuf;
 
 /// Drive, map, audit and animate any terminal program. No AI needed.
@@ -192,7 +194,7 @@ fn main() {
         eprintln!("anina: {}", scope.redactor().quiet(&format!("{e:#}")));
     }
     if !failed.is_empty() {
-        std::process::exit(1);
+        std::process::exit(ending::code(&failed));
     }
 }
 
@@ -209,7 +211,10 @@ fn dispatch(cmd: Cmd, scope: &Scope) -> Result<()> {
                 no_render: a.no_render,
                 vars: a.vars,
             };
-            record::run(&asked, scope, &Stderr::Command).map(|_| ())
+            match record::run(&asked, scope, &Stderr::Command)? {
+                record::Played::Whole(_) => Ok(()),
+                record::Played::Stopped(e) => Err(ending::read_as(Ending::Journey, e)),
+            }
         }
         Cmd::Render(a) => {
             let asked = render::Request {
@@ -269,7 +274,11 @@ fn run(a: RunArgs, scope: &Scope) -> Result<()> {
         keep: a.keep,
         embed: a.embed,
     };
-    preset::run(dir, m, &asked, scope, &said).map(|_| ())
+    let ran = preset::run(dir, m, &asked, scope, &said)?;
+    if ran.failed.is_empty() {
+        return Ok(());
+    }
+    Err(ending::ended(Ending::Journey, format!("{} part(s) failed: {}", ran.failed.len(), ran.failed.join(", "))))
 }
 
 /// `anina presets`: each preset found, what it is, its parts, and whether

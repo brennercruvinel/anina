@@ -490,7 +490,14 @@ fn writable(dir: &Path) {
 
 /// Run the preset `load` returned (`dir`, `m`); returns the output directory.
 /// Each step of the way is said to `notice`.
-pub fn run(dir: PathBuf, m: Manifest, a: &Request, scope: &Scope, notice: &dyn Notice) -> Result<PathBuf> {
+/// What `run` leaves: where it wrote, and the parts whose journey failed.
+#[derive(Debug)]
+pub struct Ran {
+    pub out: PathBuf,
+    pub failed: Vec<String>,
+}
+
+pub fn run(dir: PathBuf, m: Manifest, a: &Request, scope: &Scope, notice: &dyn Notice) -> Result<Ran> {
     // picked before any work: a wrong --part fails here
     let parts: Vec<specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
@@ -594,11 +601,8 @@ pub fn run(dir: PathBuf, m: Manifest, a: &Request, scope: &Scope, notice: &dyn N
         say(format!("redacted {r}"));
     }
     say(format!("-> {}", anina_screen::lesson::shown(&out.join("index.html"))));
-    let failed: Vec<&str> = run.parts.iter().filter(|p| p.status == "failed").map(|p| p.name.as_str()).collect();
-    if !failed.is_empty() {
-        bail!("{} part(s) failed: {}", failed.len(), failed.join(", "));
-    }
-    Ok(out)
+    let failed = run.parts.iter().filter(|p| p.status == "failed").map(|p| p.name.clone()).collect();
+    Ok(Ran { out, failed })
 }
 
 #[cfg(test)]

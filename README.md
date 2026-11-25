@@ -49,6 +49,7 @@ Every line pastes as it is: paths show relative to where you ran it, and the las
 ```sh
 anina audit -- htop                # five scores, no tape to write
 anina audit --preset glow          # a preset's journey in seven terminals
+anina audit --min-score 90 -- htop # the same audit, as a gate: exit 6 under 90
 anina presets                      # what ships
 anina run shell                    # the smallest journey, no network
 anina init -o demo.tape -- htop    # use htop; ctrl+] stops; demo.tape replays it
@@ -60,6 +61,20 @@ anina doctor                       # can anina drive a terminal here?
 ```
 
 `audit` runs the same journey in many terminals, with other sizes, color depths, `NO_COLOR` and `LC_ALL=C`. It scores stability, responsiveness and contrast, plus compatibility and terminal hygiene. With `--preset`, the sandbox starts over in every terminal, and `--embed` puts the images inside the HTML report. `explore` is experimental: it reads the key hints on screen, tries them, and maps every screen it reaches. `render` draws a recording again with another theme or speed. `brand` takes a theme from the app's own colors, and `export` writes asciicast v3 for the asciinema player.
+
+Every command ends with a code a pipeline can read:
+
+| code | the command |
+| --- | --- |
+| 0 | did what it was asked |
+| 1 | failed some other way: a file missing, a preset unknown |
+| 2 | was not understood: a flag or an argument is wrong |
+| 3 | played a journey that failed: a wait did not hold, a part did not play |
+| 4 | wrote, or was given, something to hide |
+| 5 | compared two runs that differ |
+| 6 | scored under the limit of `--min-score` |
+
+`anina audit --min-score 90 -- htop` fails when any of the five scores is under 90, so a build can hold a program to a score. A score that could not be measured does not count. When a command fails and what it wrote also has something to hide, the code is 4.
 
 Tapes are one step per line, and vhs tapes run as they are:
 

@@ -528,9 +528,20 @@ pub struct Request {
     pub vars: Vec<String>,
 }
 
-/// Record a tape; returns the output directory. What it wrote and what it
-/// went on without are said to `notice`.
-pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<PathBuf> {
+/// How the tape of `run` played.
+#[derive(Debug)]
+pub enum Played {
+    /// To its end; the output directory.
+    Whole(PathBuf),
+    /// The journey stopped: a wait that did not hold, a program that left
+    /// early. What it leaves behind (`failed.txt`) is in the output directory.
+    Stopped(anyhow::Error),
+}
+
+/// Record a tape. What it wrote and what it went on without are said to
+/// `notice`. An error is a tape that could not be read or a file that could
+/// not be written; a journey that stopped is `Played::Stopped`.
+pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<Played> {
     let name = r.tape.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned());
     let out = r.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
     std::fs::create_dir_all(&out)?;
@@ -551,7 +562,10 @@ pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<PathBuf> {
         png: true,
         ..Default::default()
     };
-    let rec = record(&tape, Config::default(), opts)?;
+    let rec = match record(&tape, Config::default(), opts) {
+        Ok(rec) => rec,
+        Err(e) => return Ok(Played::Stopped(e)),
+    };
     for w in rec.warnings.iter().skip(tape.warnings.len()) {
         notice.warning(w);
     }
@@ -578,5 +592,5 @@ pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<PathBuf> {
         anina_render::svg::write_cast_svg(&rec.cast, r.theme.as_deref(), &svg, notice)?;
         notice.status(&format!("svg -> {}", anina_screen::lesson::shown(&svg)));
     }
-    Ok(out)
+    Ok(Played::Whole(out))
 }

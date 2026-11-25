@@ -5,6 +5,7 @@
 //! text chunks anina writes into it (the screen it shows); a PNG without
 //! text is only pixels, and the summary counts it apart.
 
+use crate::ending::{Ending, ended};
 use anina_render::png::{PNG_SIGNATURE, png_text};
 use anina_runner::redact::Redactor;
 use anina_runner::redact::scope::Scope;
@@ -111,7 +112,7 @@ fn check_since(paths: &[PathBuf], since: Option<SystemTime>, red: &Redactor) -> 
     };
     let n = found.len();
     let s = |k: usize| if k == 1 { "" } else { "s" };
-    bail!("{n} thing{} to hide in {nfiles} file{} ({checked})", s(n), s(nfiles))
+    Err(ended(Ending::Hidden, format!("{n} thing{} to hide in {nfiles} file{} ({checked})", s(n), s(nfiles))))
 }
 
 /// What `text` shows that redaction would hide, a finding per match.

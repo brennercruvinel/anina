@@ -22,6 +22,10 @@ path = "../../tool/tests/leaks.rs"
 name = "walls"
 path = "../../tool/tests/walls.rs"
 
+[[test]]
+name = "codes"
+path = "../../tool/tests/codes.rs"
+
 [dependencies]
 anina-screen.workspace = true
 anina-runner.workspace = true
