@@ -294,7 +294,7 @@ static QUIT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b(quit|exit|stop|abort|leave|close app|shut ?down|log ?out)\b").unwrap());
 static RISKY: LazyLock<Regex> = LazyLock::new(|| {
     // stems, so `installs`, `deleting`, `saved` count too
-    Regex::new(r"(?i)\b(instal|uninstal|kill|terminat|delet|remov|eras|format|wip|reset|drop|purg|destroy|overwrit|commit|push|publish|deploy|send|submit|buy|pay|appl|sav|writ|upload|download)\w{0,3}\b").unwrap()
+    Regex::new(r"(?i)\b(instal|uninstal|kill|nice|renic|priorit|signal|terminat|delet|remov|eras|format|wip|reset|drop|purg|destroy|overwrit|commit|push|publish|deploy|send|submit|buy|pay|appl|sav|writ|upload|download)\w{0,3}\b").unwrap()
 });
 
 /// Ends the program (tried last, only to record the edge).
@@ -302,7 +302,24 @@ pub fn is_quit(key: &str, label: &str) -> bool {
     matches!(key, "ctrl+c" | "ctrl+q" | "ctrl+d" | "ctrl+\\") || QUIT.is_match(label)
 }
 
-/// Changes the world outside the program (skipped unless allowed).
+/// Changes the world outside the program, other processes included (skipped
+/// unless allowed).
 pub fn is_risky(label: &str) -> bool {
     RISKY.is_match(label)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_that_acts_on_another_process_is_risky() {
+        // htop's bar: F7 and F8 change the priority of the process under the cursor
+        for label in ["Nice -", "Nice +", "Kill", "Renice", "Priority", "Send signal", "Delete"] {
+            assert!(is_risky(label), "{label}");
+        }
+        for label in ["Help", "Setup", "Search", "Filter", "Tree", "SortBy"] {
+            assert!(!is_risky(label), "{label}");
+        }
+    }
 }
