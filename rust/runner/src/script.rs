@@ -297,7 +297,10 @@ pub fn parse_step(words: &[String], warnings: &mut Vec<String>) -> Result<Option
         "sleep" => Step::Sleep(duration(&arg(0)?)?),
         "hold" => Step::Hold(duration(&arg(0)?)?),
         "caption" => Step::Caption(rest()),
-        "speed" => Step::Speed(arg(0)?.parse().map_err(|_| anyhow!("Speed takes a number"))?),
+        "speed" => match arg(0)?.parse::<f64>() {
+            Ok(x) if x > 0.0 && x.is_finite() => Step::Speed(x),
+            _ => bail!("Speed takes a number above 0"),
+        },
         "hide" => Step::Hide,
         "show" => Step::Show,
         "snap" => Step::Snap(args.first().cloned()),

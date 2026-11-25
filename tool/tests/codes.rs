@@ -32,6 +32,19 @@ fn a_command_line_that_is_not_understood_ends_with_2() {
     // clap refuses both: a flag it does not know, and an audit of nothing
     assert_eq!(ends(anina().current_dir(&dir).arg("--no-such-flag")).0, Some(2));
     assert_eq!(ends(anina().current_dir(&dir).arg("audit")).0, Some(2));
+    // a speed of zero would be an animation that never ends
+    for speed in ["0", "-1", "fast"] {
+        let (code, said) = ends(anina().current_dir(&dir).args(["render", "x.cast.json", "--speed", speed]));
+        assert_eq!(code, Some(2), "--speed {speed}: {said}");
+    }
+    // a part or a sandbox belongs to a preset: with a command neither is silently dropped
+    for flag in [["--part", "one"], ["--sandbox", "strict"]] {
+        let (code, said) = ends(anina().current_dir(&dir).arg("audit").args(flag).args(["--", "true"]));
+        assert_eq!(
+            (code, said.as_str()),
+            (Some(2), "anina: --part and --sandbox go with --preset: a tape or a command has neither")
+        );
+    }
 }
 
 #[test]
@@ -59,6 +72,14 @@ fn a_journey_that_fails_ends_with_3() {
     let (code, said) = ends(anina().current_dir(&dir).env("ANINA_CACHE", &cache).args(["run", "./stops", "-o", "ran"]));
     assert_eq!((code, said.as_str()), (Some(3), "anina: 1 part(s) failed: one"));
     assert!(dir.join("ran/run.json").is_file());
+
+    // an audit whose journey breaks in the baseline terminal scored nothing: it says how
+    // many terminals it left, writes its report, and ends as a journey that failed
+    std::fs::write(dir.join("never.tape"), "Spawn sh -c 'echo ready; sleep 3'\nWait \"never\" 1\n").unwrap();
+    let (code, said) = ends(anina().current_dir(&dir).args(["audit", "never.tape", "--quick", "-o", "audited"]));
+    assert_eq!(code, Some(3), "{said}");
+    assert!(said.ends_with("3 of 4 terminals were not run (--keep-going runs them)"), "{said}");
+    assert!(dir.join("audited/report.json").is_file());
 }
 
 #[test]
