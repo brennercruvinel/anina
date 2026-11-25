@@ -376,19 +376,19 @@ impl Graph {
         );
         let _ = writeln!(t, "Set Cols {}\nSet Rows {}", l.cols, l.rows);
         if let Some(cwd) = &l.cwd {
-            let _ = writeln!(t, "Set Cwd {}", quote(&cwd.display().to_string()));
+            let _ = writeln!(t, "Set Cwd {}", portable(&cwd.display().to_string()));
         }
         if l.clean_env {
             let _ = writeln!(t, "Set CleanEnv on");
         }
         for (k, v) in &l.env {
-            let _ = writeln!(t, "Set Env {}", quote(&format!("{k}={v}")));
+            let _ = writeln!(t, "Set Env {}", portable(&format!("{k}={v}")));
         }
         if let Some(cmd) = &l.before {
             let _ = writeln!(t, "Exec {cmd}");
         }
-        let mut spawn = vec![quote(&l.program)];
-        spawn.extend(l.args.iter().map(|a| quote(a)));
+        let mut spawn = vec![portable(&l.program)];
+        spawn.extend(l.args.iter().map(|a| portable(a)));
         let _ = writeln!(t, "Spawn {}", spawn.join(" "));
         match self.distinctive(0, None) {
             Some(w) => {
@@ -543,10 +543,59 @@ pub fn quote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// A tape word for a value of this machine (a folder, a variable, the
+/// program): as `quote`, with the inherited PATH written `${PATH}` and the
+/// home path `${HOME}`, which a tape expands where it is played. The tape
+/// then names no folder of the machine that wrote it, and plays on another.
+/// A `$` of the value itself stays text.
+fn portable(s: &str) -> String {
+    portable_from(s, std::env::var("HOME").ok().as_deref(), std::env::var("PATH").ok().as_deref())
+}
+
+fn portable_from(s: &str, home: Option<&str>, path: Option<&str>) -> String {
+    // marks no value holds, put back as variables once the rest is escaped
+    let (at_path, at_home) = ("\u{1}", "\u{2}");
+    let mut v = s.to_string();
+    for (real, mark) in [(path, at_path), (home, at_home)] {
+        if let Some(real) = real.filter(|r| r.len() > 1) {
+            v = v.replace(real, mark);
+        }
+    }
+    let v = v.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$");
+    format!("\"{}\"", v.replace(at_path, "${PATH}").replace(at_home, "${HOME}"))
+}
+
 fn mermaid(s: &str) -> String {
     s.replace('"', "#quot;").replace('|', "#124;").replace(['[', ']', '{', '}', '<', '>'], " ")
 }
 
 fn table(s: &str) -> String {
     s.replace('|', "\\|")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anina_runner::script::{Step, Tape};
+
+    #[test]
+    fn a_value_of_this_machine_is_written_with_variables_and_reads_back() {
+        let (home, path) = ("/Users/alice", "/Users/alice/bin:/usr/bin");
+        let value = "PATH=/Users/alice/.cache/anina/sandbox/x/home/.local/bin:/Users/alice/bin:/usr/bin";
+        let word = portable_from(value, Some(home), Some(path));
+        assert_eq!(word, "\"PATH=${HOME}/.cache/anina/sandbox/x/home/.local/bin:${PATH}\"");
+        // a `$` and a quote of the value itself stay text
+        let prompt = portable_from("PS1=$ \"q\"", Some(home), Some(path));
+        assert_eq!(prompt, r#""PS1=\$ \"q\"""#);
+
+        // where the tape is played, the words are the values again
+        let vars = HashMap::from([("HOME".to_string(), home.to_string()), ("PATH".to_string(), path.to_string())]);
+        let tape = Tape::parse_str(&format!("Set Env {word}\nSet Env {prompt}\n"), "path.tape", &vars).unwrap();
+        let read: Vec<&str> = tape
+            .lines
+            .iter()
+            .filter_map(|l| if let Step::Set(_, v) = &l.step { v.first().map(String::as_str) } else { None })
+            .collect();
+        assert_eq!(read, [value, "PS1=$ \"q\""]);
+    }
 }

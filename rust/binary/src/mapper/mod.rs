@@ -159,7 +159,10 @@ impl<'a> Explorer<'a> {
                 break;
             }
             if let Some(code) = self.eng()?.exit_code()? {
-                bail!("the program exited with code {code} before drawing anything");
+                return Err(crate::ending::ended(
+                    crate::ending::Ending::Journey,
+                    format!("the program exited with code {code} before drawing anything: there is nothing to map"),
+                ));
             }
             if Instant::now() >= end {
                 bail!("the program drew nothing in {:?}", self.set.start_timeout);
@@ -402,6 +405,19 @@ impl<'a> Explorer<'a> {
         self.launch()?;
         let (min, max, quiet) = self.set.observe;
         let (screen, mask) = masker::observe_adaptive(self.eng()?.as_mut(), min, max, quiet)?;
+        // gone before its first screen settled: what it drew is why it left, not a screen to map
+        if let Some(code) = self.eng()?.exit_code()? {
+            self.drop_engine();
+            let drew = screen.text();
+            return Err(crate::ending::ended(
+                crate::ending::Ending::Journey,
+                format!(
+                    "{} ended as it started (exit code {code}): there is nothing to map. It drew:\n{}",
+                    self.g.launch.program,
+                    drew.trim_end()
+                ),
+            ));
+        }
         let root = new_state(0, 0, &[], screen, mask);
         self.log(format!("+ s0 start: {}", root.title));
         self.g.states.push(root);

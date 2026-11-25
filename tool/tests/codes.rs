@@ -80,6 +80,13 @@ fn a_journey_that_fails_ends_with_3() {
     assert_eq!(code, Some(3), "{said}");
     assert!(said.ends_with("3 of 4 terminals were not run (--keep-going runs them)"), "{said}");
     assert!(dir.join("audited/report.json").is_file());
+
+    // a program that ends as it starts leaves explore nothing to map: no "complete" map of it
+    let died = ["explore", "-o", "mapped", "--", "sh", "-c", "echo cannot open the terminal; exit 7"];
+    let o = anina().current_dir(&dir).args(died).output().unwrap();
+    let said = String::from_utf8_lossy(&o.stderr).into_owned();
+    assert_eq!(o.status.code(), Some(3), "{said}");
+    assert!(said.contains("(exit code 7): there is nothing to map. It drew:\ncannot open the terminal"), "{said}");
 }
 
 #[test]

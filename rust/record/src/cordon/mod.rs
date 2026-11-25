@@ -13,7 +13,8 @@
 //! Everything a run starts goes through one prefix (`Wrap`): the program a
 //! tape spawns and the shell lines around it (`Exec`, a preset's `prepare`,
 //! explore's `--before`). The fresh environment is the program's alone: a
-//! shell line keeps the caller's (see `shell`).
+//! shell line keeps the caller's (see `shell`), and explore gives its
+//! `--before` the sandbox's HOME over it.
 
 pub mod diffs;
 pub mod linux;
