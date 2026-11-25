@@ -267,7 +267,9 @@ fn decode_csi(b: &[u8]) -> Step {
     let m = nums.get(1).and_then(|p| p.first()).map(|m| mods(*m)).unwrap_or_default();
     let ev = match fin {
         b'A' | b'B' | b'C' | b'D' | b'H' | b'F' | b'P' | b'Q' | b'S' => ss3_final(fin, &m),
-        b'R' if !params.is_empty() && nums.len() == 2 && m.is_empty() => return Step::Got(len, raw()), // cursor report
+        // a cursor report (row;column). F3 with a modifier is `1;modifier`: any other row is a
+        // position, and so is row 1 when the column names no modifier
+        b'R' if nums.len() == 2 && (p0 != 1 || m.is_empty()) => return Step::Got(len, raw()),
         b'R' => ss3_final(fin, &m),
         b'Z' => key("shift+tab"),
         b'I' | b'O' if params.is_empty() => None, // focus in / out
@@ -530,7 +532,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "a cursor position report reads as F3 with modifiers unless its column is 1, 17, 33..."]
     fn a_terminal_s_answer_to_a_query_is_not_a_key() {
         for reply in [
             // device attributes, the cursor's position (row 12, column 40), a private mode's state
