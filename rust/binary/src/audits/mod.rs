@@ -260,20 +260,15 @@ impl Probe {
     }
 }
 
-/// Double-quote a word for the tape language.
+/// Quote a word for the tape language, so it reads back as written: bare
+/// when it is plain, else between single quotes, where nothing expands (a
+/// `$VAR` or a leading `~` does between double ones, escaped or not). A `'`
+/// inside goes between double quotes of its own.
 fn quote(w: &str) -> String {
     if !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c)) {
         return w.to_string();
     }
-    let mut s = String::from("\"");
-    for c in w.chars() {
-        if matches!(c, '"' | '\\' | '$' | '`') {
-            s.push('\\');
-        }
-        s.push(c);
-    }
-    s.push('"');
-    s
+    format!("'{}'", w.replace('\'', "'\"'\"'"))
 }
 
 /// Keys the screen offers for quitting, most likely first. Reads the usual
@@ -428,7 +423,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "a word with $ or a leading ~ is written between double quotes, where the tape language expands it"]
     fn the_tape_a_probe_writes_reads_back_as_the_steps_it_built() {
         // words a shell or the tape language would take apart or expand
         let cmd = ["my app", "--name=x", "say \"hi\"", "$HOME", "${HOME}", "~/x", "a\\b", "`id`", "it's", "#no", ""];

@@ -28,6 +28,8 @@
 - A preset's sandbox with a socket, a FIFO or a read-only folder (Go's module cache) no longer breaks `audit --preset`, and a second `anina run` can empty it. Each sandbox keeps its saved copy under `pristine/<name>` in the cache: two presets whose names differ after a dot no longer share one.
 - A wrong `--part` fails before the sandbox is emptied and prepare runs; it used to fail after a clone and a release build. A preset is looked up once per run, so a built-in one is extracted once.
 - `anina presets` no longer lists a folder in `demo/` without a `preset.toml` as an invalid built-in preset, and `anina run` refuses it by name.
+- The `journey.tape` that `anina audit -- PROGRAM` keeps reads back as the command that ran. A word with `$` or a leading `~` (`sh -c 'echo $HOME'`) was written between double quotes, where the tape language expands it: played again, the tape ran another command, or stopped on a variable nobody set. Such words now go between single quotes.
+- `anina audit` lists the color pairs that fail contrast in the same order on every run. A pair that failed both as text and as a graphic came out in either order.
 
 ### Changed
 
