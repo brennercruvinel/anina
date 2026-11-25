@@ -10,9 +10,12 @@
 - `--embed` on `run` and `audit`: the images go inside `index.html` / `report.html`, one file to share.
 - Every PNG anina writes carries the text of the screen it shows, and `anina check` reads it. `run`, `record`, `audit` and `explore` end with that check on the files they wrote, whether they worked or failed (a failed wait leaves `failed.txt`), judged by ctime, so a copy that kept its mtime (`cp -p`, `rsync -a`, `tar x`, `mv`) is checked too. A note kept in the output folder, or what an earlier run left there, is for `anina check` to read.
 - A tape warns when a `Type` with several words ends in something that reads as a delay: it is typed as text; `Type@30ms` sets the delay.
+- `SECURITY.md`: what redaction and the sandbox hold, by mode and by system, what neither does, and how to report a problem. The README's Privacy section follows it.
 
 ### Fixed
 
+- `--sandbox strict` holds for everything a run starts. A tape's `Exec`, a preset's `[[prepare]]` and `explore --before` now run inside the OS sandbox, behind the same prefix as the program; before, only the program did, and the shell lines of the same run wrote wherever they could. A refused line fails with the reason: `the sandbox refused it: --sandbox strict allows writes only under the sandbox root (...)`. `prepare` may also write anina's cache, where presets keep clones and builds; a toolchain's own cache (`~/.cargo`) is not writable, so a build that fills one runs first under `env` (ADR-0006).
+- Under `--sandbox strict` on macOS, a program can no longer remove the sandbox root and leave a link in its place, and a root that is a link is refused.
 - On macOS, recordings no longer show the per-user temp folder (`/var/folders/<id>/T`): status lines print it as `$TMPDIR/...`, redaction hides it on screen as `$TMPDIR` (`temp path`), and `anina check` reports it. The shared `/tmp` stays as it is.
 - Redaction no longer pulls a row of output up into the line above it. A row that fills the width and is followed by text looked wrapped, so hiding a path in it laid the next row onto its end (`ab ~/xyzwhello`) and a `Wait` on that output failed. A match inside one row is now replaced in that row; a match the wrap cuts is still hidden across both.
 - On macOS, `bash` tapes no longer open with the notice that the default shell is now zsh: every program gets `BASH_SILENCE_DEPRECATION_WARNING=1` unless the tape sets it.
@@ -27,6 +30,7 @@
 
 ### Changed
 
+- Under `--sandbox strict` the network is off unless the preset says `network = true`, the loopback included. The field was only printed by `anina presets`. `explore --sandbox strict` has no preset and so no network. The presets that need it (`astro`, `burn`, `urna`) already declare it.
 - The run's part line reads `part 1/1 edit · title` (a middle dot instead of a dash), so the output pastes into docs as is.
 - One crate became a workspace of five under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary. Commands, flags and output are the same. The split first carried four more crates with no code (`anina-codecs`, `anina-design`, `anina-motion`, `anina-recode`); they are gone, and a crate comes back the day its first line is written.
 - Modules renamed on the way:
