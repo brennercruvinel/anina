@@ -201,9 +201,15 @@ pub fn measure_at(screens: &[Screen], picks: &[(usize, u16, u16)]) -> Stats {
             at,
         })
         .collect();
-    // worst ratio first, then the most cells; ties broken by colors so the order is stable
+    // worst ratio first, then the most cells; ties broken by colors, then text before
+    // graphics, so the order is stable: nothing else tells two pairs apart
     worst.sort_by(|a, b| {
-        a.ratio.total_cmp(&b.ratio).then(b.cells.cmp(&a.cells)).then(a.fg.cmp(&b.fg)).then(a.bg.cmp(&b.bg))
+        a.ratio
+            .total_cmp(&b.ratio)
+            .then(b.cells.cmp(&a.cells))
+            .then(a.fg.cmp(&b.fg))
+            .then(a.bg.cmp(&b.bg))
+            .then(a.graphic.cmp(&b.graphic))
     });
     worst.truncate(12);
     st.worst = worst;
@@ -403,7 +409,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "a pair failing as text and as a graphic comes out in the order of a hash map"]
     fn the_same_screen_lists_its_failing_pairs_in_the_same_order() {
         // one color pair failing as text and as a graphic: nothing but the kind tells the two apart
         let s = [parse("\x1b[38;2;85;85;85m█y", 4, 1)];
