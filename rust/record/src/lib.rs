@@ -583,6 +583,15 @@ pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<Played> {
     for w in rec.warnings.iter().skip(tape.warnings.len()) {
         notice.warning(w);
     }
+    if rec.first_screen.is_none() {
+        // lnav does this: it asks the terminal for its 256 colors at once and waits
+        notice.warning(if r.engine == "tmux" {
+            "the program drew nothing"
+        } else {
+            "the program drew nothing. If it draws in your own terminal, it may be waiting for answers \
+             the in-process terminal could not hand back: try --engine tmux"
+        });
+    }
     let cast_path = out.join(format!("{name}.cast.json.gz"));
     rec.cast.save(&cast_path)?;
     notice.status(&format!(
