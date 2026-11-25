@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+## 0.1.0
+
 ### Added
 
+- `v0.1.0`, the first version, with binaries: one archive for macOS and one for Linux, each for arm64 and x86_64, with a SHA-256 checksum and a build provenance attestation (`gh attestation verify`). Installing no longer needs a compiler.
+- `ARCHITECTURE.md`: the crates and what each depends on, and the path a run takes from the program to `anina check`, each part linked to its ADR. `CONTRIBUTING.md`: who writes the commits, one task in one branch and one pull request, and the gates a change passes.
 - Exit codes that say what kind of failure it was: 2 a command line not understood, 3 a journey that failed (a wait that did not hold, a part that did not play), 4 something to hide in what was written, 5 two runs that differ, 6 a score under the limit; 1 stays for any other failure. Every failure used to exit 1, so a pipeline could not tell a leak from a failed wait. What a command prints is the same. When a command fails and its output also has something to hide, the code is 4.
 - `anina audit --min-score N`: the command fails, with code 6, when any of the five scores is under N (0 to 100), after the report is written: `2 scores under 90: readability 0, compatibility 80`. A score that could not be measured does not count. With `--preset`, every part is audited before the limit is held. Without the flag an audit still never fails on a score.
 - Presets for glow, harlequin and helix, each recorded end to end in an empty sandbox. Their steps and waits come from `anina init`; harlequin and helix check their result inside the tape (`Wait "27,211"`, `Exec grep`).
