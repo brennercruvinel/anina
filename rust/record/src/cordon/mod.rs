@@ -80,6 +80,10 @@ impl Wrap {
 impl Sandbox {
     /// Create (or reuse) the sandbox directories under `root`.
     pub fn new(root: &Path, mode: Mode) -> Result<Sandbox> {
+        // a link here would make its target the writable root
+        if std::fs::symlink_metadata(root).is_ok_and(|m| m.file_type().is_symlink()) {
+            bail!("{} is a symbolic link; a sandbox root is a folder of its own", root.display());
+        }
         std::fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
         // the real path: macOS's /tmp is /private/tmp, and sandbox rules match real paths
         let root = std::fs::canonicalize(root)?;

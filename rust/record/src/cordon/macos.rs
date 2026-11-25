@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 /// The SBPL profile for a sandbox rooted at `root`, with `more` folders
 /// writable besides it (real, canonical paths: the rules match those).
 ///
+/// The root itself is not the program's to remove or rename: put a link in
+/// its place and anina, which is not confined, would follow it.
+///
 /// Without `network`, no address is reachable, the loopback included. A
 /// socket file under the root still is: a program talks to its own helpers.
 pub fn profile(root: &Path, more: &[PathBuf], network: bool) -> String {
@@ -23,11 +26,12 @@ pub fn profile(root: &Path, more: &[PathBuf], network: bool) -> String {
     for m in more {
         p.push_str(&format!("  (subpath \"{}\")\n", q(m)));
     }
-    p.push_str(
+    p.push_str(&format!(
         "\x20 (subpath \"/dev\")\n\
          \x20 (subpath \"/private/var/folders\")\n\
-         \x20 (literal \"/private/tmp\"))\n",
-    );
+         \x20 (literal \"/private/tmp\"))\n\
+         (deny file-write* (literal \"{root}\"))\n"
+    ));
     if !network {
         p.push_str(&format!(
             "(deny network*)\n\
@@ -56,6 +60,7 @@ mod tests {
   (subpath "/dev")
   (subpath "/private/var/folders")
   (literal "/private/tmp"))
+(deny file-write* (literal "/c/sandbox/x"))
 "#;
     const NO_NETWORK: &str = r#"(deny network*)
 (allow network*
@@ -71,9 +76,10 @@ mod tests {
     }
 
     #[test]
-    fn more_folders_are_writable_besides_the_root() {
+    fn more_folders_are_writable_and_the_root_stays_guarded() {
         let p = profile(Path::new("/c/sandbox/x"), &[PathBuf::from("/c")], true);
         assert!(p.contains("  (subpath \"/c/sandbox/x\")\n  (subpath \"/c\")\n  (subpath \"/dev\")\n"), "{p}");
+        assert!(p.ends_with("(deny file-write* (literal \"/c/sandbox/x\"))\n"), "{p}");
     }
 
     #[test]

@@ -160,6 +160,32 @@ fn no_network_under_strict_unless_it_is_declared() {
 }
 
 #[test]
+fn the_root_is_not_the_program_s_to_replace() {
+    if !walls() {
+        return;
+    }
+    let dir = scratch("replace");
+    let strict = sandbox(&dir, Mode::Strict);
+    let root = quoted(&strict.root.display().to_string());
+    let target = dir.join("elsewhere");
+    std::fs::create_dir_all(&target).unwrap();
+
+    // a link in the root's place would send anina, which is not confined, wherever it points
+    let _ = program(
+        &strict,
+        &format!("rm -rf {root}; ln -s {} {root}; mv {root} {root}.gone", quoted(&target.display().to_string())),
+    );
+    let md = std::fs::symlink_metadata(&strict.root).unwrap();
+    assert!(md.is_dir(), "the root was replaced");
+
+    // and a root that already is a link is not taken as one
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let e = Sandbox::new(&link, Mode::Env).unwrap_err().to_string();
+    assert!(e.ends_with("is a symbolic link; a sandbox root is a folder of its own"), "{e}");
+}
+
+#[test]
 fn a_root_with_a_quote_and_a_space_in_its_name_holds_the_same() {
     if !walls() {
         return;
