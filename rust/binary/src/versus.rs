@@ -184,7 +184,7 @@ fn untimed(b: &[u8]) -> String {
 
 /// A PNG without its text chunks: what it draws, not what it says.
 fn pixels(png: &[u8]) -> Vec<u8> {
-    let chunks = anina_render::pixel::png_chunks(png);
+    let chunks = anina_render::png::png_chunks(png);
     if chunks.is_empty() {
         return png.to_vec();
     }
@@ -398,8 +398,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("anina-versus-{}", std::process::id()));
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#123"/></svg>"##;
         let (p1, p2) = (dir.join("a.png"), dir.join("b.png"));
-        anina_render::pixel::svg_to_png(svg, &p1, 1.0).unwrap();
-        anina_render::pixel::svg_to_png_with_text(svg, &p2, 1.0, Some("screen")).unwrap();
+        anina_render::png::svg_to_png(svg, &p1, 1.0).unwrap();
+        anina_render::png::svg_to_png_with_text(svg, &p2, 1.0, Some("screen")).unwrap();
         let (a, b) = (std::fs::read(&p1).unwrap(), std::fs::read(&p2).unwrap());
         assert_ne!(a, b);
         assert_eq!(pixels(&a), pixels(&b));

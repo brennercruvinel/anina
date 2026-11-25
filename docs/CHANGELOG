@@ -31,12 +31,13 @@
 - One crate became a workspace of five under `rust/` (ADR-0013): `anina-screen`, `anina-runner`, `anina-render`, `anina-record` and the `anina` binary. Commands, flags and output are the same. The split first carried four more crates with no code (`anina-codecs`, `anina-design`, `anina-motion`, `anina-recode`); they are gone, and a crate comes back the day its first line is written.
 - Modules renamed on the way:
   - `ansi`, `cast`, `teach` -> `anina_screen::escape`, `frames`, `lesson`
-  - `engine::tuitest`, `engine::tmux` -> `anina_runner::engine::inner`, `outer`
+  - `engine::tuitest`, `engine::tmux` -> `anina_runner::engine::tuitest`, `tmux`, names kept
   - `tape`, `volatile`, `privacy` -> `anina_runner::script`, `masker`, `redact`
-  - `render::font`, `gallery`, `png`, `svg` -> `anina_render::fonts`, `index`, `pixel`, `shape`; `brand` -> `anina_render::brand`
+  - `render::font`, `gallery` -> `anina_render::fonts`, `index`; `render::png`, `svg` and `brand` -> `anina_render::png`, `svg` and `brand`, names kept
   - `record` -> `anina_record`; `sandbox` (`fsdiff`) -> `anina_record::cordon` (`diffs`); `preset::manifest`, `report` -> `anina_record::preset::specs`, `print`
   - `audit` (`contrast`, `matrix`, `measure`, `report`) -> `audits` (`ratio`, `cases`, `meter`, `print`)
   - `explore` -> `mapper`; `init` (`keys`, `passthrough`, `tapegen`) -> `taping` (`input`, `relay`, `print`); `check` -> `checks`
+- A module that holds one thing the world already named keeps that name, whatever its length: an engine, a file format, an operating system (ADR-0010). The engines and the SVG and PNG writers were `inner`, `outer`, `shape` and `pixel` for seven weeks of this cycle and are `tuitest`, `tmux`, `svg` and `png` again. Every other module keeps the name the split gave it.
 - `presets/` is `demo/`. The CI workflow is `gatecheck.yml`.
 - The folders that held only a `.gitkeep` are gone: seven under `demo/` (presets still to come) and `pkgs/` with its four. Every folder in `demo/` is a preset.
 - Releases are tagged `v{{version}}` for the whole workspace.

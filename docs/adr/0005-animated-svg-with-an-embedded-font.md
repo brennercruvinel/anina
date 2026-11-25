@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [svg, smil, font, png]
 supersedes: []
 superseded-by: null
-related: [rust/render/src/shape.rs, rust/render/src/pixel.rs, rust/render/src/fonts.rs]
+related: [rust/render/src/svg.rs, rust/render/src/png.rs, rust/render/src/fonts.rs]
 ---
 
 # ADR-0005: Animate as a self-contained SVG with an embedded font subset

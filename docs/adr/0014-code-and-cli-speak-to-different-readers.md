@@ -5,7 +5,7 @@ kind: decision
 status: accepted
 category: STRUCTURE
 date: 2026-10-07
-last-updated: 2026-10-07
+last-updated: 2026-11-25
 tags: [naming, cli, lexicon]
 supersedes: []
 superseded-by: null
@@ -41,6 +41,7 @@ Keep both. The CLI, the file formats (`preset.toml`, tape variables, `run.json`)
 ### Follow-up
 
 - A new term with a public name gets its `cli` field in the same change.
+- 2026-11-25: ADR-0010 gave the two engines back the names the world uses. The `inner` and `outer` of the context above are `engine/tuitest` and `engine/tmux` now, and only the first still differs from its public name, by a hyphen. The other pairs stand.
 
 ## References
 

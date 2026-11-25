@@ -9,7 +9,7 @@ last-updated: 2026-10-06
 tags: [engine, tui-test, tmux, pty]
 supersedes: []
 superseded-by: null
-related: [rust/runner/src/engine/mod.rs, rust/runner/src/engine/inner.rs, rust/runner/src/engine/outer.rs]
+related: [rust/runner/src/engine/mod.rs, rust/runner/src/engine/tuitest.rs, rust/runner/src/engine/tmux.rs]
 ---
 
 # ADR-0002: Run programs in an in-process terminal emulator (tui-test), with tmux as a fallback

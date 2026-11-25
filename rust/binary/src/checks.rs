@@ -5,7 +5,7 @@
 //! text chunks anina writes into it (the screen it shows); a PNG without
 //! text is only pixels, and the summary counts it apart.
 
-use anina_render::pixel::{PNG_SIGNATURE, png_text};
+use anina_render::png::{PNG_SIGNATURE, png_text};
 use anina_runner::redact::Redactor;
 use anyhow::{Result, bail};
 use regex::Regex;
@@ -261,7 +261,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("anina-check-png-{}", std::process::id()));
         let png = dir.join("s.png");
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#123"/></svg>"##;
-        anina_render::pixel::svg_to_png_with_text(svg, &png, 1.0, Some("shell\n$ ls /Users/alice")).unwrap();
+        anina_render::png::svg_to_png_with_text(svg, &png, 1.0, Some("shell\n$ ls /Users/alice")).unwrap();
         let Content::Png(text) = read(&png).unwrap() else { panic!("not read as a png with text") };
         let f = scan(&png, &text, &red());
         assert_eq!(f.len(), 1, "{text}");

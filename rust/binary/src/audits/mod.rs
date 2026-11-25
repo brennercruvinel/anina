@@ -177,7 +177,7 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>)
         let mut o = meter::outcome(v, rec, &dir);
         if let Some(s) = &o.shot {
             let png = dir.join("screen.png");
-            if anina_render::pixel::screen_png(s, &v.name, "", &png).is_ok() {
+            if anina_render::png::screen_png(s, &v.name, "", &png).is_ok() {
                 o.shot_png = png.strip_prefix(out).ok().map(|p| p.display().to_string());
             }
         }

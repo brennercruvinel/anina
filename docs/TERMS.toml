@@ -31,15 +31,10 @@ path = "rust/record/src/cordon"
 about = "isolates a run: fresh HOME and environment, the OS sandbox when strict"
 cli = "--sandbox"
 
-[terms.inner]
-path = "rust/runner/src/engine/inner.rs"
-about = "the in-process terminal engine"
+[terms.tuitest]
+path = "rust/runner/src/engine/tuitest.rs"
+about = "the in-process terminal engine; a module name takes no hyphen"
 cli = "tui-test"
-
-[terms.outer]
-path = "rust/runner/src/engine/outer.rs"
-about = "the tmux engine, the fallback"
-cli = "tmux"
 
 [terms.versus]
 path = "rust/binary/src/versus.rs"

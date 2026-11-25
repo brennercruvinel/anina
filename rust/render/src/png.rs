@@ -6,7 +6,7 @@
 //! `anina-screen`), so `anina check` can read what the pixels show. Writing
 //! that chunk and reading a PNG's chunks back both live here.
 
-use super::shape::render_screen;
+use super::svg::render_screen;
 use super::theme::Theme;
 use anina_screen::Screen;
 use anyhow::{Context, Result, anyhow};
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn text_lands_before_iend() {
-        let dir = std::env::temp_dir().join(format!("anina-pixel-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("anina-png-{}", std::process::id()));
         let path = dir.join("t.png");
         let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#123"/></svg>"##;
         svg_to_png_with_text(svg, &path, 1.0, Some("title\nhello")).unwrap();

@@ -596,7 +596,7 @@ pub fn run(a: Args) -> Result<PathBuf> {
                 let cast_path = pdir.join(format!("{}.cast.json.gz", part.name));
                 rec.cast.save(&cast_path)?;
                 let svg = pdir.join(format!("{}.svg", part.name));
-                let svg_ok = match anina_render::shape::write_cast_svg(&rec.cast, None, &svg) {
+                let svg_ok = match anina_render::svg::write_cast_svg(&rec.cast, None, &svg) {
                     Ok(()) => true,
                     Err(e) => {
                         say(format!("  no svg: {e:#}"));
