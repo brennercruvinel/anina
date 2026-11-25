@@ -32,7 +32,8 @@ Snap 03-colors
 Poster
 
 Caption "4 · a clean environment"
-Type "env | cut -d= -f1 | sort | tr '\n' ' '; echo"
+# LC_ALL=C: the same order on every machine, whatever LANG the host hands down
+Type "env | cut -d= -f1 | LC_ALL=C sort | tr '\n' ' '; echo"
 Key Enter
 Wait "XDG_STATE_HOME"
 Sleep 1.2
