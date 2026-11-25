@@ -1,0 +1,70 @@
+a shell, recorded by anina
+==========================
+
+[0.0s]
+
+## 1 · where the sandbox puts you
+
+[2.1s]
+    $ pwd; echo ~
+    /sandbox/work
+    ~
+    $
+
+## 2 · files
+
+[7.3s]
+    $ pwd; echo ~
+    /sandbox/work
+    ~
+    $ ls notes && cat notes/hello.txt
+    hello.txt
+    hello from anina
+    $
+
+## 3 · colors
+
+[18.5s]
+    $ pwd; echo ~
+    /sandbox/work
+    ~
+    $ ls notes && cat notes/hello.txt
+    hello.txt
+    hello from anina
+    $ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
+    ne\033[0m\n'
+    green truecolor underline
+    $
+
+## 4 · a clean environment
+
+[22.7s]
+    $ pwd; echo ~
+    /sandbox/work
+    ~
+    $ ls notes && cat notes/hello.txt
+    hello.txt
+    hello from anina
+    $ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
+    ne\033[0m\n'
+    green truecolor underline
+    $ env | cut -d= -f1 | sort | tr '\n' ' '; echo
+    BASH_SILENCE_DEPRECATION_WARNING COLORTERM HOME LANG LOGNAME PATH PS1 PWD SHELL SHLV
+    L TERM TMPDIR USER XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME _
+    $
+
+[26.8s]
+    $ pwd; echo ~
+    /sandbox/work
+    ~
+    $ ls notes && cat notes/hello.txt
+    hello.txt
+    hello from anina
+    $ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
+    ne\033[0m\n'
+    green truecolor underline
+    $ env | cut -d= -f1 | sort | tr '\n' ' '; echo
+    BASH_SILENCE_DEPRECATION_WARNING COLORTERM HOME LANG LOGNAME PATH PS1 PWD SHELL SHLV
+    L TERM TMPDIR USER XDG_CACHE_HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME _
+    $ exit
+    exit

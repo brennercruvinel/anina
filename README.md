@@ -108,6 +108,8 @@ The SVG is one looping timeline with an embedded subset of JetBrains Mono, so it
 
 The code is a workspace of five crates in [`rust/`](rust), layered from the screen up to the binary: `screen`, then `runner` and `render`, then `record`, then `binary`. The reasons behind each choice are in [`docs/adr/`](docs/adr).
 
+anina checks its own output with its own command. `tool/tasks/selfcheck.sh` plays the `shell` preset and runs `anina compare` against the run kept in [`tool/tests/shell/`](tool/tests/shell) for the system it is on, macOS or Linux. [`tool/tasks/fullcheck.sh`](tool/tasks/fullcheck.sh) runs it with the other gates, and CI runs that same script. A pull request that changes what anina records on purpose runs `tool/tasks/selfcheck.sh --update` on both systems and brings the two references with it.
+
 ## Limits
 
 Mouse input isn't scripted yet. Glyphs outside JetBrains Mono (CJK, emoji, some arrows) fall back to the viewer's fonts. `explore` treats screens with the same key bar and most cells equal as one state, so a search box can show up as a screen of its own. Windows is untested, and on macOS a process list still shows real app names; `mask` rules are how you hide them.
