@@ -87,7 +87,7 @@ mask = ['/Applications/[^/ ]+\.app']          # regex, shown as •••, cell 
 
 `run`, `record`, `audit` and `explore` end with `anina check` on what they wrote, and it fails the command if something slipped. Each PNG carries the text of the screen it shows, so the check reads screenshots too. It reads text: a binary file is skipped and counted.
 
-`anina run` gives the program a fresh HOME and environment. `--sandbox strict` adds the OS sandbox, `sandbox-exec` on macOS and `bwrap` on Linux, around everything the run starts: the program, a tape's `Exec`, a preset's `prepare`. A write outside the sandbox root fails, the system's temp and device folders aside, and the network is off unless the preset says `network = true`. When an `Exec` or a `prepare` is refused, the error says so. Reads stay open, and `Exec` and `prepare` keep your environment.
+`anina run` gives the program a fresh HOME and environment. `--sandbox strict` adds the OS sandbox, `sandbox-exec` on macOS and `bwrap` on Linux, around everything the run starts: the program, a tape's `Exec`, a preset's `prepare`. A write outside the sandbox root fails, the system's temp and device folders aside (and anina's cache, for `prepare`), and the network is off unless the preset says `network = true`. When an `Exec` or a `prepare` is refused, the error says so. Reads stay open, and `Exec` and `prepare` keep your environment.
 
 A tape is code: `Exec` runs a shell line. Run a tape or a preset from someone else as you would run their script. [`SECURITY.md`](SECURITY.md) has every guarantee and every limit, by mode and by system, and how to report a problem.
 

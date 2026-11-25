@@ -21,7 +21,7 @@ What is replaced, found when anina starts:
 
 A replacement keeps the grid: the columns after it stay where the program drew them.
 
-`run`, `record`, `audit` and `explore` end with `anina check` on the files they wrote, whether they worked or failed, and the command fails if it finds something. The check reads every text file, casts inside their gzip, and every PNG through the text of the screen anina stores in it.
+`run`, `record`, `audit` and `explore` end with `anina check` on the files they wrote, whether they worked or failed, and the command fails if it finds something. The check reads every text file, casts inside their gzip, and a PNG through the text of the screen anina stores in it.
 
 Code: `rust/runner/src/redact.rs`, `rust/binary/src/checks.rs`.
 
