@@ -86,7 +86,11 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
         }
     }
     if let Some(dir) = BUILTIN.get_dir(name).filter(|d| is_builtin(d)) {
-        let dest = cache_dir().join("presets");
+        let cache = cache_dir();
+        // a `prepare` writes the cache: a link it left on the way to this
+        // folder would lead the emptying and the extraction elsewhere
+        crate::cordon::kept(&cache, "presets", name)?;
+        let dest = cache.join("presets");
         std::fs::create_dir_all(&dest)?;
         let _ = std::fs::remove_dir_all(dest.join(name));
         // extract() writes entries by their path from the embed root

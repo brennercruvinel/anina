@@ -83,6 +83,7 @@ A system whose reference nobody recorded yet holds one file, `PENDING`. There th
 ### Follow-up
 
 - Record the Linux reference: `tool/tasks/selfcheck.sh --update` on Linux, then commit `tool/tests/shell/linux`.
+- 2026-11-25 (#121): the first runs on GitHub's runners went red with no change in anina, and both reasons were the reference's. The environment step sorted by the host's `LANG`, which the sandbox hands down to the program: `_` came last on the Mac that recorded the reference and first on the runner. The preset now sorts with `LC_ALL=C`, so what it prints no longer follows the host's locale. And a Linux run recorded in an emulated container is no reference for the runner: its disk report lists the emulator's own cache folder (`home/.cache/rosetta`). A reference is recorded where the check runs: `gatecheck` uploads each system's run as the artifact `selfcheck-<system>`, and `tool/tasks/selfcheck.sh --keep SYSTEM RUN` keeps a downloaded one. The Linux reference is the runner's, so a Mac is enough to bring both. Measured there, dash is as the context expected: no `SHLVL`, no `_`, no history file, nothing printed on `exit`.
 
 ## References
 

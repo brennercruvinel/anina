@@ -1,0 +1,7 @@
+$ pwd; echo ~
+/sandbox/work
+~
+$ ls notes && cat notes/hello.txt
+hello.txt
+hello from anina
+$

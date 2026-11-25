@@ -1,5 +1,5 @@
 {
-  "changes": "3 created, 0 modified, 0 deleted, 206 B written\n        189 B  home/.bash_history\n         17 B  work/notes",
+  "changes": "3 created, 0 modified, 0 deleted, 215 B written\n        198 B  home/.bash_history\n         17 B  work/notes",
   "description": "A plain POSIX shell in an empty sandbox: the smallest journey, no network",
   "engine": "tui-test",
   "homepage": "https://github.com/brennercruvinel/anina",
@@ -8,11 +8,11 @@
       "cast": "basics/basics.cast.json.gz",
       "error": null,
       "exit_code": 0,
-      "first_screen": 0.16,
-      "frames": 157,
+      "first_screen": 0.03,
+      "frames": 156,
       "name": "basics",
-      "screens": 131,
-      "seconds": 26.83,
+      "screens": 133,
+      "seconds": 19.02,
       "shots": [
         "basics/shots/01-where",
         "basics/shots/02-files",
@@ -26,7 +26,7 @@
     }
   ],
   "preset": "shell",
-  "recorded": "2026-11-25T09:58:28Z",
+  "recorded": "2026-11-25T12:02:31Z",
   "sandbox": "env",
-  "seconds": 27.24
+  "seconds": 19.1
 }
