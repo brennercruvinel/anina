@@ -41,7 +41,7 @@ A gate is added in `tool/tasks/fullcheck.sh` and nowhere else. CI adds what a de
 - **What changes**, in one or two lines, and one place where it is seen working.
 - **An ADR** when it makes or changes a decision: the next number, `docs/adr/TEMPLATE.md`, a row in the table of `docs/adr/README.md`. A decision that moves gets a dated follow-up in its ADR, with the original text left as it was.
 - **A line in `docs/CHANGELOG`** when a user sees the change.
-- **The reference run**, when what anina records changes on purpose: `tool/tasks/selfcheck.sh --update` on macOS and on Linux, both folders in the same pull request.
+- **The reference run**, when what anina records changes on purpose, for both systems in the same pull request: `tool/tasks/selfcheck.sh --update` on the system you have, and for the other the run `gatecheck` uploads as the artifact `selfcheck-<system>`, kept with `tool/tasks/selfcheck.sh --keep SYSTEM RUN`.
 - **A line saying why**, for a new dependency.
 
 ## The code
