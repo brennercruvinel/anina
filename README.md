@@ -1,4 +1,4 @@
-# anIna is the best friend of terminal freaks
+# anina is the best friend of terminal freaks
 
 ** Audit, map, redact and record terminal **
 
