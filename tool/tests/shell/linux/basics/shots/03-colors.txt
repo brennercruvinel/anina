@@ -1,0 +1,10 @@
+$ pwd; echo ~
+/sandbox/work
+~
+$ ls notes && cat notes/hello.txt
+hello.txt
+hello from anina
+$ printf '\033[1;32mgreen\033[0m \033[38;2;255;120;0mtruecolor\033[0m \033[4munderli
+ne\033[0m\n'
+green truecolor underline
+$

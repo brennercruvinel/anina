@@ -267,7 +267,9 @@ fn decode_csi(b: &[u8]) -> Step {
     let m = nums.get(1).and_then(|p| p.first()).map(|m| mods(*m)).unwrap_or_default();
     let ev = match fin {
         b'A' | b'B' | b'C' | b'D' | b'H' | b'F' | b'P' | b'Q' | b'S' => ss3_final(fin, &m),
-        b'R' if !params.is_empty() && nums.len() == 2 && m.is_empty() => return Step::Got(len, raw()), // cursor report
+        // a cursor report (row;column). F3 with a modifier is `1;modifier`: any other row is a
+        // position, and so is row 1 when the column names no modifier
+        b'R' if nums.len() == 2 && (p0 != 1 || m.is_empty()) => return Step::Got(len, raw()),
         b'R' => ss3_final(fin, &m),
         b'Z' => key("shift+tab"),
         b'I' | b'O' if params.is_empty() => None, // focus in / out
@@ -325,4 +327,230 @@ fn kitty(code: u32, m: &str) -> Option<Ev> {
         return key("shift+tab");
     }
     Some(Ev::Key(format!("{m}{name}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anina_runner::engine::normalize_key;
+
+    /// Everything `bytes` say, as one read followed by the end of input.
+    fn decode(bytes: &[u8]) -> Vec<Ev> {
+        let mut d = Decoder::default();
+        let mut out = d.feed(bytes);
+        out.extend(d.flush());
+        out
+    }
+
+    fn text(t: &str) -> Ev {
+        Ev::Text(t.into())
+    }
+
+    fn k(name: &str) -> Ev {
+        Ev::Key(name.into())
+    }
+
+    /// Each sequence is one key, named the way a tape and the engines name it.
+    fn keys(table: &[(&[u8], &str)]) {
+        for (bytes, name) in table {
+            assert_eq!(decode(bytes), [k(name)], "{}", escape_bytes(bytes));
+            assert_eq!(normalize_key(name), *name, "{name} is not how the engines spell it");
+        }
+    }
+
+    #[test]
+    fn typed_text_stays_text() {
+        assert_eq!(decode(b"hello world"), [text("hello world")]);
+        assert_eq!(decode("é日本 ✓".as_bytes()), [text("é日本 ✓")]);
+        // keys cut the text where they were pressed
+        assert_eq!(decode(b"ls\rcd ..\t"), [text("ls"), k("enter"), text("cd .."), k("tab")]);
+        assert_eq!(decode(b""), []);
+    }
+
+    #[test]
+    fn control_bytes_are_keys() {
+        keys(&[
+            (b"\r", "enter"),
+            (b"\t", "tab"),
+            (b"\x7f", "backspace"),
+            (b"\x00", "ctrl+space"),
+            (b"\x01", "ctrl+a"),
+            (b"\x03", "ctrl+c"),
+            (b"\x04", "ctrl+d"),
+            (b"\x0a", "ctrl+j"),
+            (b"\x1a", "ctrl+z"),
+            (b"\x1c", "ctrl+\\"),
+            (b"\x1d", "ctrl+]"),
+            (b"\x1e", "ctrl+^"),
+            (b"\x1f", "ctrl+_"),
+        ]);
+    }
+
+    #[test]
+    fn cursor_and_function_keys_are_named_in_both_modes() {
+        keys(&[
+            // normal mode (CSI) and application mode (SS3)
+            (b"\x1b[A", "up"),
+            (b"\x1b[B", "down"),
+            (b"\x1b[C", "right"),
+            (b"\x1b[D", "left"),
+            (b"\x1b[H", "home"),
+            (b"\x1b[F", "end"),
+            (b"\x1bOA", "up"),
+            (b"\x1bOB", "down"),
+            (b"\x1bOC", "right"),
+            (b"\x1bOD", "left"),
+            (b"\x1bOH", "home"),
+            (b"\x1bOF", "end"),
+            (b"\x1bOM", "enter"),
+            (b"\x1bOP", "f1"),
+            (b"\x1bOQ", "f2"),
+            (b"\x1bOR", "f3"),
+            (b"\x1bOS", "f4"),
+            (b"\x1b[Z", "shift+tab"),
+            // the keys xterm sends as a number and a tilde
+            (b"\x1b[1~", "home"),
+            (b"\x1b[2~", "insert"),
+            (b"\x1b[3~", "delete"),
+            (b"\x1b[4~", "end"),
+            (b"\x1b[5~", "pageup"),
+            (b"\x1b[6~", "pagedown"),
+            (b"\x1b[7~", "home"),
+            (b"\x1b[8~", "end"),
+            (b"\x1b[11~", "f1"),
+            (b"\x1b[12~", "f2"),
+            (b"\x1b[13~", "f3"),
+            (b"\x1b[14~", "f4"),
+            (b"\x1b[15~", "f5"),
+            (b"\x1b[17~", "f6"),
+            (b"\x1b[18~", "f7"),
+            (b"\x1b[19~", "f8"),
+            (b"\x1b[20~", "f9"),
+            (b"\x1b[21~", "f10"),
+            (b"\x1b[23~", "f11"),
+            (b"\x1b[24~", "f12"),
+        ]);
+    }
+
+    #[test]
+    fn xterm_modifiers_are_one_plus_shift_1_alt_2_ctrl_4_super_8() {
+        keys(&[
+            (b"\x1b[1;2A", "shift+up"),
+            (b"\x1b[1;3A", "alt+up"),
+            (b"\x1b[1;4A", "alt+shift+up"),
+            (b"\x1b[1;5C", "ctrl+right"),
+            (b"\x1b[1;6D", "ctrl+shift+left"),
+            (b"\x1b[1;7B", "ctrl+alt+down"),
+            (b"\x1b[1;8H", "ctrl+alt+shift+home"),
+            (b"\x1b[1;9F", "super+end"),
+            (b"\x1b[1;2P", "shift+f1"),
+            (b"\x1b[1;5R", "ctrl+f3"),
+            (b"\x1b[3;5~", "ctrl+delete"),
+            (b"\x1b[5;3~", "alt+pageup"),
+            (b"\x1b[15;2~", "shift+f5"),
+            (b"\x1b[24;6~", "ctrl+shift+f12"),
+        ]);
+    }
+
+    #[test]
+    fn escape_before_a_key_is_alt_and_alone_is_the_escape_key() {
+        keys(&[
+            (b"\x1b", "esc"),
+            (b"\x1bx", "alt+x"),
+            (b"\x1bX", "alt+shift+x"),
+            (b"\x1b.", "alt+."),
+            (b"\x1b\r", "alt+enter"),
+            (b"\x1b\x7f", "alt+backspace"),
+        ]);
+        assert_eq!(decode(b"\x1b\x1b"), [k("esc"), k("esc")]);
+        assert_eq!(decode(b"\x1b\x1b[A"), [k("esc"), k("up")]);
+    }
+
+    #[test]
+    fn kitty_keys_carry_a_code_and_modifiers() {
+        keys(&[
+            (b"\x1b[13u", "enter"),
+            (b"\x1b[27u", "esc"),
+            (b"\x1b[13;2u", "shift+enter"),
+            (b"\x1b[9;2u", "shift+tab"),
+            (b"\x1b[127;3u", "alt+backspace"),
+            (b"\x1b[32;5u", "ctrl+space"),
+            (b"\x1b[97;5u", "ctrl+a"),
+            (b"\x1b[97;6u", "ctrl+shift+a"),
+        ]);
+        // a letter with no modifier is typed text
+        assert_eq!(decode(b"\x1b[97u\x1b[98u"), [text("ab")]);
+    }
+
+    #[test]
+    fn a_sequence_cut_between_two_reads_is_one_key() {
+        for (name, whole) in [
+            ("ctrl+right", &b"\x1b[1;5C"[..]),
+            ("f5", b"\x1b[15~"),
+            ("up", b"\x1bOA"),
+            ("alt+x", b"\x1bx"),
+            ("ctrl+a", b"\x1b[97;5u"),
+        ] {
+            for cut in 1..whole.len() {
+                let mut d = Decoder::default();
+                assert_eq!(d.feed(&whole[..cut]), [], "{name} cut at {cut}");
+                assert!(d.has_pending());
+                assert_eq!(d.feed(&whole[cut..]), [k(name)], "{name} cut at {cut}");
+                assert!(!d.has_pending());
+            }
+        }
+        // a character too: the three bytes of 日, one at a time
+        let mut d = Decoder::default();
+        let bytes = "日".as_bytes();
+        assert_eq!(
+            (d.feed(&bytes[..1]), d.feed(&bytes[1..2]), d.feed(&bytes[2..])),
+            (vec![], vec![], vec![text("日")])
+        );
+    }
+
+    #[test]
+    fn a_paste_is_text_whatever_it_holds() {
+        // a newline, a tab and an arrow-key sequence, pasted: none of them is a key
+        assert_eq!(decode(b"\x1b[200~ls -la\r\n\tcd \x1b[A\x1b[201~"), [text("ls -la\r\n\tcd \x1b[A")]);
+        assert_eq!(decode(b"a\x1b[200~b\x1b[201~c\r"), [text("abc"), k("enter")]);
+        // cut anywhere, the end marker included
+        let whole = b"\x1b[200~hello\x1b[201~";
+        for cut in 1..whole.len() {
+            let mut d = Decoder::default();
+            let mut got = d.feed(&whole[..cut]);
+            got.extend(d.feed(&whole[cut..]));
+            assert_eq!(got, [text("hello")], "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn mouse_and_focus_reports_are_dropped() {
+        // SGR press and release, the old three-byte form, focus in and out
+        assert_eq!(decode(b"a\x1b[<0;10;5M\x1b[<0;10;5mb"), [text("ab")]);
+        assert_eq!(decode(b"a\x1b[M !!b"), [text("ab")]);
+        assert_eq!(decode(b"\x1b[I\x1b[O"), []);
+    }
+
+    #[test]
+    fn a_terminal_s_answer_to_a_query_is_not_a_key() {
+        for reply in [
+            // device attributes, the cursor's position (row 12, column 40), a private mode's state
+            &b"\x1b[?1;2c"[..],
+            b"\x1b[>0;276;0c",
+            b"\x1b[12;40R",
+            b"\x1b[1;1R",
+            b"\x1b[?2026;2$y",
+        ] {
+            assert_eq!(decode(reply), [Ev::Unknown(escape_bytes(reply))], "{}", escape_bytes(reply));
+        }
+    }
+
+    #[test]
+    fn what_no_step_can_say_is_shown_as_its_bytes() {
+        assert_eq!(escape_bytes(b"\x1b[5n a\xff"), "\\x1b[5n a\\xff");
+        assert_eq!(decode(b"\x1b[5n"), [Ev::Unknown("\\x1b[5n".into())]);
+        assert_eq!(decode(b"\x1bOz"), [Ev::Unknown("\\x1bOz".into())]);
+        // a byte that is not UTF-8 does not take the text after it
+        assert_eq!(decode(b"\xffok"), [Ev::Unknown("\\xff".into()), text("ok")]);
+    }
 }

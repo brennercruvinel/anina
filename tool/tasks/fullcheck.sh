@@ -1,16 +1,41 @@
 #!/bin/sh
-# every gate a pull request must pass, in the order ci runs them.
+# every gate a pull request must pass, in order. ci runs this same script
+# (.github/workflows/gatecheck.yml), so what passes here is what passes there:
+# a gate is added in this file and nowhere else.
 # run from anywhere: `tool/tasks/fullcheck.sh`
 set -eu
 cd "$(dirname "$0")/../.."
 
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo run --quiet -p anina -- doctor
-cargo deny check
-# the only warnings expected here: the `leaks` and `walls` tests are not in
-# the package.
+# one gate: its name, then its command. a gate that fails ends the script
+# (`set -e`), and `finish` says which one it was. in GitHub Actions a gate is
+# also a group in the log and a row in the job's summary.
+gate() {
+  running=$1
+  shift
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "::group::$running"; else echo "fullcheck: $running" >&2; fi
+  started=$(date +%s)
+  "$@"
+  [ -z "${GITHUB_ACTIONS:-}" ] || echo "::endgroup::"
+  row "$running" passed "$(($(date +%s) - started))s"
+  running=
+}
+row() {
+  [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "| $1 | $2 | $3 |" >>"$GITHUB_STEP_SUMMARY"
+}
+finish() {
+  release_lock
+  [ -n "$running" ] || return 0
+  row "$running" "**failed**" ""
+  [ -z "${GITHUB_ACTIONS:-}" ] || printf '::endgroup::\n::error title=fullcheck::the %s gate failed\n' "$running"
+  echo "fullcheck: the $running gate failed" >&2
+}
+running=
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  printf '### fullcheck on %s\n\n| gate | result | time |\n| --- | --- | --- |\n' "$(uname -s)" >>"$GITHUB_STEP_SUMMARY"
+fi
+
+# the only warnings expected from packaging: the `leaks` and `walls` tests are
+# not in the package.
 # a target dir under a new path on every run. once packaged, the workspace's
 # crates are registry crates to cargo: it unpacks each one into
 # ~/.cargo/registry/src/<hash of the registry's path>/ and never again at the
@@ -59,8 +84,19 @@ release_lock() {
   rm -rf "$lock"
   held=0
 }
-trap release_lock EXIT
+package() {
+  take_lock
+  rm -rf target/fullcheck-package
+  CARGO_TARGET_DIR="target/fullcheck-package/$(date +%s)" cargo package --workspace --locked --allow-dirty
+}
+trap finish EXIT
 trap 'exit 130' INT TERM
-take_lock
-rm -rf target/fullcheck-package
-CARGO_TARGET_DIR="target/fullcheck-package/$(date +%s)" cargo package --workspace --locked --allow-dirty
+
+gate fmt cargo fmt --check
+gate clippy cargo clippy --workspace --all-targets -- -D warnings
+gate test cargo test --workspace
+gate doctor cargo run --quiet -p anina -- doctor
+# anina on its own output: the shell preset against the run kept in tool/tests/shell
+gate selfcheck tool/tasks/selfcheck.sh
+gate deny cargo deny check
+gate package package

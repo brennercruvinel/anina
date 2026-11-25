@@ -3,33 +3,116 @@ on:
   push:
     branches: [main]
   pull_request:
+
+# the token reads the repository and does nothing else
+permissions:
+  contents: read
+
+# every action is pinned by commit; the comment names the version it is.
+# to move one: gh api repos/OWNER/REPO/commits/TAG --jq .sha
 jobs:
-  test:
+  # every gate, by the script a developer runs: tool/tasks/fullcheck.sh holds
+  # the list (fmt, clippy, test, doctor, selfcheck, deny, package), and each
+  # gate is a group in this job's log and a row in its summary
+  fullcheck:
+    name: ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: macos, os: macos-latest }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: tmux (the optional engine) and, on Linux, bubblewrap (the strict sandbox)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+      - run: tool/tasks/provision.sh
+      - run: tool/tasks/fullcheck.sh
+      # the run selfcheck recorded on this system: what to look at when the
+      # gate fails, and the reference for a system a developer does not have
+      # (tool/tasks/selfcheck.sh --keep)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: selfcheck-${{ matrix.name }}
+          path: target/selfcheck/run
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # the oldest Rust the manifest promises: `rust-version` in Cargo.toml, read
+  # from there so the two cannot drift
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: manifest
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get install -y tmux bubblewrap
-            # bwrap needs unprivileged user namespaces; Ubuntu 24.04 keeps them behind AppArmor
-            if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
-              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-            fi
-          else
-            brew install tmux
-          fi
-      - run: cargo fmt --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo build --release
-      - run: cargo test --workspace
-      - run: cargo run --quiet -p anina -- doctor
-      - run: cargo package --workspace --locked
+          echo "rust=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)" >>"$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: ${{ steps.manifest.outputs.rust }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo check --workspace --all-targets --locked
+
+  # the profile a release is built with (lto, one codegen unit, stripped):
+  # too slow for every local run of fullcheck, so it is built here
+  release:
+    name: release (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: macos, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build --release --locked
+
+  # how much of the code the tests run, in this job's summary. it runs the
+  # tests once more, so a test that fails here fails in fullcheck too
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master, 2026-11-15
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-llvm-cov@0.9.2
+          fallback: none
+      - run: tool/tasks/provision.sh
+      - name: cargo llvm-cov
+        run: |
+          cargo llvm-cov --workspace --summary-only >"$RUNNER_TEMP/coverage.txt"
+          {
+            echo '### Coverage of the workspace by its tests'
+            echo
+            echo '```'
+            sed -n '/^Filename/,$p' "$RUNNER_TEMP/coverage.txt"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          sed -n '/^TOTAL/p' "$RUNNER_TEMP/coverage.txt"

@@ -260,20 +260,15 @@ impl Probe {
     }
 }
 
-/// Double-quote a word for the tape language.
+/// Quote a word for the tape language, so it reads back as written: bare
+/// when it is plain, else between single quotes, where nothing expands (a
+/// `$VAR` or a leading `~` does between double ones, escaped or not). A `'`
+/// inside goes between double quotes of its own.
 fn quote(w: &str) -> String {
     if !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c)) {
         return w.to_string();
     }
-    let mut s = String::from("\"");
-    for c in w.chars() {
-        if matches!(c, '"' | '\\' | '$' | '`') {
-            s.push('\\');
-        }
-        s.push(c);
-    }
-    s.push('"');
-    s
+    format!("'{}'", w.replace('\'', "'\"'\"'"))
 }
 
 /// Keys the screen offers for quitting, most likely first. Reads the usual
@@ -375,4 +370,77 @@ pub fn probe(cmd: &[String], engine_name: &str) -> Result<Probe> {
     e.close()?;
     p.quit_keys.clear();
     Ok(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn quit_keys_are_read_from_the_hints_a_screen_shows() {
+        for (screen, want) in [
+            ("q quit", vec!["q"]),
+            ("ctrl+q quit", vec!["ctrl+q"]),
+            ("^X Exit", vec!["ctrl+x"]),
+            ("[k] Kill", vec!["k"]),
+            ("<q> close", vec!["q"]),
+            ("Quit : q", vec!["q"]),
+            ("exit: esc", vec!["esc"]),
+            ("Press q to quit", vec!["q"]),
+            ("Escape to close", vec!["esc"]),
+            // the footers of nano and htop
+            ("^G Help      ^O Write Out  ^X Exit", vec!["ctrl+x"]),
+            ("F1Help  F2Setup  F9Kill  F10Quit", vec!["f10"]),
+            ("3 files · 120 lines · utf-8", vec![]),
+            ("", vec![]),
+        ] {
+            assert_eq!(quit_hints(screen), want, "{screen:?}");
+        }
+    }
+
+    #[test]
+    fn the_likeliest_quit_key_comes_first_and_each_key_once() {
+        // quit before exit before close, wherever each sits on screen
+        assert_eq!(quit_hints("esc close · x exit\n\n  q quit"), ["q", "x", "esc"]);
+        assert_eq!(quit_hints("q quit\nhelp: ?  q quit"), ["q"]);
+    }
+
+    #[test]
+    fn a_probe_says_how_the_program_ends() {
+        let probe = |exits_after: Option<f64>, keys: &[&str]| Probe {
+            exits_after,
+            quit_keys: keys.iter().map(|k| k.to_string()).collect(),
+        };
+        assert_eq!(probe(Some(0.42), &[]).describe(), "it exits by itself after 0.4s");
+        assert_eq!(probe(None, &["esc", "q"]).describe(), "it quits with: esc, q");
+        assert_eq!(probe(None, &[]).describe(), "found no way to quit it; the journey ends with it running");
+    }
+
+    /// The steps of a tape, as text to compare.
+    fn steps(t: &Tape) -> Vec<String> {
+        t.lines.iter().map(|l| format!("{:?}", l.step)).collect()
+    }
+
+    #[test]
+    fn the_tape_a_probe_writes_reads_back_as_the_steps_it_built() {
+        // words a shell or the tape language would take apart or expand
+        let cmd = ["my app", "--name=x", "say \"hi\"", "$HOME", "${HOME}", "~/x", "a\\b", "`id`", "it's", "#no", ""];
+        let cmd: Vec<String> = cmd.iter().map(|w| w.to_string()).collect();
+        let vars: HashMap<String, String> = [("HOME".to_string(), "/home/me".to_string())].into();
+        for p in [
+            Probe { exits_after: None, quit_keys: vec!["q".into(), "ctrl+c".into()] },
+            Probe { exits_after: Some(0.25), quit_keys: Vec::new() },
+            Probe::default(),
+        ] {
+            let (src, built) = p.tape(&cmd);
+            let read = Tape::parse_str(&src, "journey.tape", &vars).unwrap();
+            assert_eq!(steps(&read), steps(&built), "{src}");
+            assert!(matches!(&built.lines[0].step, Step::Spawn(argv) if *argv == cmd), "{:?}", built.lines[0]);
+            assert!(read.warnings.is_empty(), "{:?}", read.warnings);
+        }
+        // open and settle, wait out a program that leaves by itself, press each quit key
+        let (src, _) = Probe { exits_after: Some(0.25), quit_keys: vec!["q".into()] }.tape(&["top".to_string()]);
+        assert_eq!(src, "# written by anina audit\nSpawn top\nIdle 5\nSleep 0.75\nKey q\nIdle 3\n");
+    }
 }

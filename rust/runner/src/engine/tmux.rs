@@ -169,3 +169,103 @@ impl Drop for Tmux {
         let _ = self.close();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::{normalize_key, wait_for};
+    use super::*;
+    use anina_screen::Pattern;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_key_goes_to_tmux_under_the_name_tmux_gives_it() {
+        for (key, tmux) in [
+            ("enter", "Enter"),
+            ("esc", "Escape"),
+            ("tab", "Tab"),
+            ("shift+tab", "BTab"),
+            ("backspace", "BSpace"),
+            ("space", "Space"),
+            ("up", "Up"),
+            ("down", "Down"),
+            ("left", "Left"),
+            ("right", "Right"),
+            ("home", "Home"),
+            ("end", "End"),
+            ("pageup", "PPage"),
+            ("pagedown", "NPage"),
+            ("delete", "DC"),
+            ("insert", "IC"),
+            ("f1", "F1"),
+            ("f12", "F12"),
+            // a letter is itself, case kept, `f` included
+            ("a", "a"),
+            ("G", "G"),
+            ("f", "f"),
+            ("?", "?"),
+            ("ctrl+c", "C-c"),
+            ("alt+x", "M-x"),
+            ("ctrl+alt+x", "C-M-x"),
+            ("shift+up", "S-Up"),
+            ("ctrl+right", "C-Right"),
+            ("ctrl+shift+left", "C-S-Left"),
+            ("alt+enter", "M-Enter"),
+            ("ctrl+space", "C-Space"),
+            ("shift+f5", "S-F5"),
+        ] {
+            assert_eq!(tmux_key(key), tmux, "{key}");
+            // and tmux's name reads back as the key
+            assert_eq!(normalize_key(tmux), key, "{tmux}");
+        }
+    }
+
+    /// Whether tmux is here to be tried. Without it the test says so and
+    /// passes on a developer's machine; in CI it fails, where it is installed.
+    fn tmux_here() -> bool {
+        if Command::new("tmux").arg("-V").output().is_ok_and(|o| o.status.success()) {
+            return true;
+        }
+        assert!(std::env::var_os("CI").is_none(), "tmux is missing: the tmux engine was not tested");
+        eprintln!("skipped: no tmux here, the tmux engine was not tested");
+        false
+    }
+
+    #[test]
+    fn a_program_in_tmux_is_typed_to_resized_and_seen_to_exit() {
+        if !tmux_here() {
+            return;
+        }
+        let script = "printf 'name? '; read n; echo \"hello $n\"; read x; stty size; read y; exit 3";
+        let mut spec = Spec::new("/bin/sh", vec!["-c".into(), script.into()]);
+        (spec.cols, spec.rows) = (40, 5);
+        let mut e = Tmux::default();
+        e.spawn(&spec).unwrap();
+        let shows = |e: &mut Tmux, text: &str| {
+            let (seen, s) = wait_for(e, &Pattern::Text(text.into()), false, Duration::from_secs(10)).unwrap();
+            assert!(seen, "{text:?} never showed; the screen was:\n{}", s.text());
+            s
+        };
+        let s = shows(&mut e, "name?");
+        assert_eq!((s.cols, s.rows, e.exit_code().unwrap()), (40, 5, None));
+        e.write("anina").unwrap();
+        e.key("enter").unwrap();
+        shows(&mut e, "hello anina");
+        assert_eq!(e.modes().unwrap().get("alt_screen"), Some(&false));
+        // the program sees the new size, not only anina
+        e.resize(60, 8).unwrap();
+        e.key("enter").unwrap();
+        let s = shows(&mut e, "8 60");
+        assert_eq!((s.cols, s.rows), (60, 8));
+        e.key("enter").unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        let code = loop {
+            if let Some(code) = e.exit_code().unwrap() {
+                break code;
+            }
+            assert!(Instant::now() < end, "the program never exited");
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        assert_eq!(code, 3);
+        e.close().unwrap();
+    }
+}

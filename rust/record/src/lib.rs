@@ -225,11 +225,19 @@ impl Rec {
         let secs = timeout.unwrap_or(self.cfg.wait_timeout);
         let end = Instant::now() + Duration::from_secs_f64(secs);
         loop {
-            let s = match self.tick(false)? {
-                Some(s) => s,
-                None => self.read()?,
+            let (s, sampled) = match self.tick(false)? {
+                Some(s) => (s, true),
+                None => (self.read()?, false),
             };
             if pat.matches(&s) != gone {
+                // read between two samples, the screen the wait held on is a
+                // frame of this step all the same: the next step may change
+                // the caption, and what a step ends with must not follow the
+                // sampling clock
+                if !sampled && self.recording {
+                    self.push(&s, false);
+                    self.last_screen = Some(s);
+                }
                 return Ok(());
             }
             if let Some(code) = self.eng.exit_code()? {
@@ -579,4 +587,24 @@ pub fn run(a: Args) -> Result<PathBuf> {
         eprintln!("anina: svg -> {}", anina_screen::lesson::shown(&svg));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One sample a second, and the program draws between two of them: the
+    /// screen a `Wait` holds on is read off the sampling clock. It is a frame
+    /// of the step that waited all the same, so what a step ends with (the
+    /// transcript shows it) does not follow where the clock stood.
+    #[test]
+    fn the_screen_a_wait_held_on_is_a_frame_of_its_step() {
+        let src = "Set FPS 1\nSpawn sh -c 'sleep 0.3; printf ready; sleep 2'\nWait \"ready\"\nCaption \"after\"\n";
+        let tape = Tape::parse_str(src, "wait.tape", &HashMap::new()).unwrap();
+        let out_dir = std::env::temp_dir().join(format!("anina-wait-{}", std::process::id()));
+        let cast =
+            record(&tape, Config::default(), Options { out_dir, quiet: true, ..Options::default() }).unwrap().cast;
+        let waited = cast.frames.iter().filter(|f| f.caption.is_empty()).any(|f| cast.screens[f.s].contains("ready"));
+        assert!(waited, "no frame of the step that waited shows what its wait held on");
+    }
 }
