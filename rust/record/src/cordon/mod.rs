@@ -6,12 +6,19 @@
 //!   LANG and TERM, with HOME, XDG_*_HOME and TMPDIR under the root. It can
 //!   still write anywhere it has permission to; it just has no reason to.
 //! - `strict`: the same, inside the OS sandbox (macOS `sandbox-exec`, Linux
-//!   `bwrap`), where a write outside the root, /dev and the temp dirs fails.
+//!   `bwrap`), where a write outside the root, /dev and the temp dirs fails
+//!   and the network is off unless the preset says `network = true`.
 //! - `off`: run as is, with the caller's environment.
+//!
+//! Everything a run starts goes through one prefix (`Wrap`): the program a
+//! tape spawns and the shell lines around it (`Exec`, a preset's `prepare`,
+//! explore's `--before`). The fresh environment is the program's alone: a
+//! shell line keeps the caller's (see `shell`).
 
 pub mod diffs;
 pub mod linux;
 pub mod macos;
+pub mod shell;
 
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
@@ -45,15 +52,75 @@ pub struct Sandbox {
     pub tmp: PathBuf,
     /// A working directory for the program, empty at first.
     pub work: PathBuf,
+    /// Under `strict`: whether the network is reachable (a preset's
+    /// `network = true`). Off where nothing declares it.
+    pub network: bool,
+}
+
+/// How the processes of a run start: the argv prefix that puts each one
+/// inside the OS sandbox, and what that sandbox allows, to say so when it
+/// refuses. The default confines nothing.
+#[derive(Clone, Debug, Default)]
+pub struct Wrap {
+    /// `sandbox-exec -p PROFILE` or `bwrap ... --`; empty when nothing confines.
+    pub prefix: Vec<String>,
+    /// The folders a write is allowed under, the root first.
+    pub writable: Vec<PathBuf>,
+    pub network: bool,
+}
+
+impl Wrap {
+    /// `argv` behind the prefix: the one way into the sandbox, for the
+    /// program and for every shell line.
+    pub fn argv<S: AsRef<str>>(&self, argv: &[S]) -> Vec<String> {
+        self.prefix.iter().cloned().chain(argv.iter().map(|a| a.as_ref().to_string())).collect()
+    }
+}
+
+/// Whether no component of `path` (a real path when it was taken) is a link
+/// now, as far as the path exists.
+fn plain(path: &Path) -> bool {
+    let there = path.ancestors().find(|p| std::fs::symlink_metadata(p).is_ok());
+    there.is_none_or(|p| std::fs::canonicalize(p).is_ok_and(|real| real == p))
+}
+
+/// Where anina keeps the folder `name` of one `kind` in its `cache`:
+/// `CACHE/KIND/NAME`, as the system names it. The cache may be a link (one
+/// kept on another disk). Below it nothing may lead away, neither a link nor
+/// the name (`..`, a path from `/`), and that is settled before anina empties
+/// or fills the folder: a `prepare` writes the cache, and an earlier one may
+/// have left a link there.
+pub fn kept(cache: &Path, kind: &str, name: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(cache).with_context(|| format!("creating {}", cache.display()))?;
+    let held = std::fs::canonicalize(cache)?.join(kind);
+    let root = held.join(name);
+    if root == held || !root.starts_with(&held) || !plain(&root) {
+        bail!(
+            "{} is not a folder of its own in anina's cache: a symbolic link or the name leads elsewhere",
+            root.display()
+        );
+    }
+    Ok(root)
+}
+
+/// Where the sandbox `name` lives in anina's `cache`: `CACHE/sandbox/NAME`
+/// (see `kept`).
+pub fn place(cache: &Path, name: &str) -> Result<PathBuf> {
+    kept(cache, "sandbox", name)
 }
 
 impl Sandbox {
     /// Create (or reuse) the sandbox directories under `root`.
     pub fn new(root: &Path, mode: Mode) -> Result<Sandbox> {
+        // a link here would make its target the writable root
+        if std::fs::symlink_metadata(root).is_ok_and(|m| m.file_type().is_symlink()) {
+            bail!("{} is a symbolic link; a sandbox root is a folder of its own", root.display());
+        }
         std::fs::create_dir_all(root).with_context(|| format!("creating {}", root.display()))?;
         // the real path: macOS's /tmp is /private/tmp, and sandbox rules match real paths
         let root = std::fs::canonicalize(root)?;
-        let sb = Sandbox { mode, home: root.join("home"), tmp: root.join("tmp"), work: root.join("work"), root };
+        let (home, tmp, work) = (root.join("home"), root.join("tmp"), root.join("work"));
+        let sb = Sandbox { mode, home, tmp, work, root, network: false };
         for d in [&sb.home, &sb.tmp, &sb.work] {
             std::fs::create_dir_all(d)?;
         }
@@ -64,6 +131,24 @@ impl Sandbox {
             sb.check_tool()?;
         }
         Ok(sb)
+    }
+
+    /// After lines that could write around the root (`who`: a preset's
+    /// `prepare` writes the cache the root lives in), the root is still the
+    /// folder `new` made, and no link stands on the way to `beside`, what
+    /// anina keeps next to it. anina is not confined: it would follow a link
+    /// wherever it points.
+    pub fn still_in_place(&self, who: &str, beside: &[PathBuf]) -> Result<()> {
+        if !plain(&self.root) || !self.root.is_dir() {
+            bail!(
+                "{who} moved the sandbox root or put a link in its path: {} is no longer the folder anina made",
+                self.root.display()
+            );
+        }
+        if let Some(p) = beside.iter().find(|p| !plain(p)) {
+            bail!("{who} put a link in the path of {}, which anina keeps beside the sandbox root", p.display());
+        }
+        Ok(())
     }
 
     fn xdg(&self) -> [(&'static str, PathBuf); 4] {
@@ -111,14 +196,25 @@ impl Sandbox {
         env
     }
 
-    /// The argv prefix that puts a program inside the OS sandbox (empty
-    /// unless `strict`).
-    pub fn wrap(&self) -> Vec<String> {
-        match self.mode {
-            Mode::Strict if cfg!(target_os = "macos") => macos::wrap(&self.root),
-            Mode::Strict => linux::wrap(&self.root, &self.home, &self.tmp),
-            _ => Vec::new(),
+    /// What puts a process of this run inside the OS sandbox (nothing unless
+    /// `strict`).
+    pub fn wrap(&self) -> Wrap {
+        self.wrap_with(&[])
+    }
+
+    /// `wrap`, with `more` folders writable besides the root (real paths): a
+    /// preset's prepare clones and builds in anina's cache.
+    pub fn wrap_with(&self, more: &[PathBuf]) -> Wrap {
+        if self.mode != Mode::Strict {
+            return Wrap::default();
         }
+        let prefix = if cfg!(target_os = "macos") {
+            macos::wrap(&self.root, more, self.network)
+        } else {
+            linux::wrap(&self.root, more, self.network)
+        };
+        let writable = std::iter::once(&self.root).chain(more).cloned().collect();
+        Wrap { prefix, writable, network: self.network }
     }
 
     fn check_tool(&self) -> Result<()> {

@@ -862,7 +862,7 @@ pub fn run(a: Args) -> Result<()> {
     let sb = match mode {
         Mode::Off => None,
         _ => {
-            let root = anina_record::preset::cache_dir().join("sandbox").join(format!("explore-{base}"));
+            let root = anina_record::cordon::place(&anina_record::preset::cache_dir(), &format!("explore-{base}"))?;
             if root.exists() {
                 std::fs::remove_dir_all(&root)?;
             }
@@ -890,8 +890,9 @@ pub fn run(a: Args) -> Result<()> {
         rows: a.rows,
         before: a.before.clone(),
     };
-    let argv: Vec<String> =
-        sb.as_ref().map(|s| s.wrap()).unwrap_or_default().into_iter().chain(a.command.iter().cloned()).collect();
+    // no preset here to declare a network: under strict there is none
+    let wrap = sb.as_ref().map(|s| s.wrap()).unwrap_or_default();
+    let argv = wrap.argv(&a.command);
     let mut spec = Spec::new(argv[0].clone(), argv[1..].to_vec());
     spec.cols = a.cols;
     spec.rows = a.rows;
@@ -911,10 +912,7 @@ pub fn run(a: Args) -> Result<()> {
     red.rules.extend(Redactor::defaults().rules);
     let make: Factory = Box::new(move || {
         if let Some(cmd) = &before {
-            let st = std::process::Command::new("sh").arg("-c").arg(cmd).status()?;
-            if !st.success() {
-                bail!("--before failed ({st}): {cmd}");
-            }
+            wrap.sh(&[], cmd).run("--before")?;
         }
         let mut e: Box<dyn Engine> = Box::new(Redacted::new(engine::by_name(&engine_name)?, red.clone()));
         e.spawn(&spec)?;

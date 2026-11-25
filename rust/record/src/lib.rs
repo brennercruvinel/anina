@@ -11,7 +11,7 @@ use anina_runner::redact::Redactor;
 use anina_runner::script::{Step, Tape};
 use anina_screen::frames::{Cast, Frame, now_iso};
 use anina_screen::{Pattern, Screen};
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -32,8 +32,9 @@ pub struct Config {
     pub env: Vec<(String, String)>,
     pub clean_env: bool,
     pub shell: Vec<String>,
-    /// An argv prefix the program runs under (an OS sandbox, `nice`...).
-    pub wrap: Vec<String>,
+    /// What puts the program and the tape's `Exec` lines inside the OS
+    /// sandbox; the default confines nothing.
+    pub wrap: cordon::Wrap,
 }
 
 impl Default for Config {
@@ -52,7 +53,7 @@ impl Default for Config {
             env: Vec::new(),
             clean_env: false,
             shell: vec!["sh".into()],
-            wrap: Vec::new(),
+            wrap: cordon::Wrap::default(),
         }
     }
 }
@@ -198,7 +199,7 @@ impl Rec {
         if self.started {
             bail!("Spawn runs once per tape");
         }
-        let argv: Vec<String> = self.cfg.wrap.iter().chain(argv).cloned().collect();
+        let argv = self.cfg.wrap.argv(argv);
         let mut spec = Spec::new(argv[0].clone(), argv[1..].to_vec());
         spec.cols = self.cfg.cols;
         spec.rows = self.cfg.rows;
@@ -309,14 +310,8 @@ impl Rec {
     fn step(&mut self, step: &Step) -> Result<()> {
         match step {
             Step::Set(name, vals) => self.set(name, vals, false)?,
-            Step::Exec(cmd) => {
-                // -u: a variable nobody set fails by name instead of being ""
-                let st =
-                    std::process::Command::new("sh").arg("-u").arg("-c").arg(cmd).status().context("running sh")?;
-                if !st.success() {
-                    bail!("Exec failed ({st}): {cmd}");
-                }
-            }
+            // -u: a variable nobody set fails by name instead of being ""
+            Step::Exec(cmd) => self.cfg.wrap.sh(&["-u"], cmd).run("Exec")?,
             Step::Spawn(argv) => self.spawn(argv)?,
             Step::Type { text, delay } => {
                 self.need()?;

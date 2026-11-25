@@ -1,26 +1,104 @@
 //! macOS: `sandbox-exec` with a generated profile. Everything is allowed
-//! (reads, network, processes) except writing outside the sandbox root, the
-//! devices and the per-user temp dirs.
+//! (reads, processes, talking to other programs) except two things: writing
+//! outside the sandbox root, the devices and the per-user temp dirs, and,
+//! unless the run declares it, the network.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// The SBPL profile for a sandbox rooted at `root` (a real, canonical path).
-pub fn profile(root: &Path) -> String {
-    let q = |p: &str| p.replace('\\', "\\\\").replace('"', "\\\"");
-    format!(
+/// The SBPL profile for a sandbox rooted at `root`, with `more` folders
+/// writable besides it (real, canonical paths: the rules match those).
+///
+/// The root itself is not the program's to remove or rename: put a link in
+/// its place and anina, which is not confined, would follow it. Nor are the
+/// folders that hold it, where a `more` folder makes them writable: a link
+/// in the place of one of those leads away just the same.
+///
+/// Without `network`, no address is reachable, the loopback included. A
+/// socket file under the root still is: a program talks to its own helpers.
+pub fn profile(root: &Path, more: &[PathBuf], network: bool) -> String {
+    let q = |p: &Path| p.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    let holders = root.ancestors().skip(1).filter(|a| more.iter().any(|m| a.starts_with(m)));
+    let guards: String = holders.map(|a| format!("(deny file-write* (literal \"{}\"))\n", q(a))).collect();
+    let root = q(root);
+    let mut p = format!(
         "(version 1)\n\
          (allow default)\n\
          (deny file-write*)\n\
          (allow file-write*\n\
-         \x20 (subpath \"{}\")\n\
-         \x20 (subpath \"/dev\")\n\
+         \x20 (subpath \"{root}\")\n"
+    );
+    for m in more {
+        p.push_str(&format!("  (subpath \"{}\")\n", q(m)));
+    }
+    p.push_str(&format!(
+        "\x20 (subpath \"/dev\")\n\
          \x20 (subpath \"/private/var/folders\")\n\
-         \x20 (literal \"/private/tmp\"))\n",
-        q(&root.display().to_string())
-    )
+         \x20 (literal \"/private/tmp\"))\n\
+         (deny file-write* (literal \"{root}\"))\n\
+         {guards}"
+    ));
+    if !network {
+        p.push_str(&format!(
+            "(deny network*)\n\
+             (allow network*\n\
+             \x20 (local unix-socket (subpath \"{root}\"))\n\
+             \x20 (remote unix-socket (subpath \"{root}\")))\n"
+        ));
+    }
+    p
 }
 
 /// The argv prefix: `sandbox-exec -p PROFILE`.
-pub fn wrap(root: &Path) -> Vec<String> {
-    vec!["/usr/bin/sandbox-exec".into(), "-p".into(), profile(root)]
+pub fn wrap(root: &Path, more: &[PathBuf], network: bool) -> Vec<String> {
+    vec!["/usr/bin/sandbox-exec".into(), "-p".into(), profile(root, more, network)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROOT_ONLY: &str = r#"(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+  (subpath "/c/sandbox/x")
+  (subpath "/dev")
+  (subpath "/private/var/folders")
+  (literal "/private/tmp"))
+(deny file-write* (literal "/c/sandbox/x"))
+"#;
+    const NO_NETWORK: &str = r#"(deny network*)
+(allow network*
+  (local unix-socket (subpath "/c/sandbox/x"))
+  (remote unix-socket (subpath "/c/sandbox/x")))
+"#;
+
+    #[test]
+    fn the_profile_denies_the_network_unless_it_is_declared() {
+        let root = Path::new("/c/sandbox/x");
+        assert_eq!(profile(root, &[], true), ROOT_ONLY);
+        assert_eq!(profile(root, &[], false), format!("{ROOT_ONLY}{NO_NETWORK}"));
+    }
+
+    #[test]
+    fn more_folders_are_writable_and_the_way_to_the_root_stays_guarded() {
+        let root = Path::new("/c/sandbox/x");
+        let p = profile(root, &[PathBuf::from("/c")], true);
+        assert!(p.contains("  (subpath \"/c/sandbox/x\")\n  (subpath \"/c\")\n  (subpath \"/dev\")\n"), "{p}");
+        // the root, then what holds it up to the writable folder, and no further
+        let guards = "(deny file-write* (literal \"/c/sandbox/x\"))\n\
+                      (deny file-write* (literal \"/c/sandbox\"))\n\
+                      (deny file-write* (literal \"/c\"))\n";
+        assert!(p.ends_with(&format!("  (literal \"/private/tmp\"))\n{guards}")), "{p}");
+        // a folder that does not hold the root guards nothing more
+        assert_eq!(profile(root, &[PathBuf::from("/d")], true).matches("(deny file-write* (literal").count(), 1);
+    }
+
+    #[test]
+    fn a_quote_or_a_backslash_in_a_path_stays_inside_its_string() {
+        let p = profile(Path::new("/c/a\"b\\c"), &[PathBuf::from("/d/\")(allow default)(\"")], true);
+        assert!(p.contains(r#"(subpath "/c/a\"b\\c")"#), "{p}");
+        assert!(p.contains(r#"(subpath "/d/\")(allow default)(\"")"#), "{p}");
+        assert_eq!(wrap(Path::new("/r"), &[], false).len(), 3);
+    }
 }

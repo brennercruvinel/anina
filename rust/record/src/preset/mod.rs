@@ -94,7 +94,11 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
         }
     }
     if let Some(dir) = BUILTIN.get_dir(name).filter(|d| is_builtin(d)) {
-        let dest = cache_dir().join("presets");
+        let cache = cache_dir();
+        // a `prepare` writes the cache: a link it left on the way to this
+        // folder would lead the emptying and the extraction elsewhere
+        crate::cordon::kept(&cache, "presets", name)?;
+        let dest = cache.join("presets");
         std::fs::create_dir_all(&dest)?;
         let _ = std::fs::remove_dir_all(dest.join(name));
         // extract() writes entries by their path from the embed root
@@ -251,11 +255,11 @@ impl Stage {
         // the sandbox, empty unless keep
         let mode: Mode = a.sandbox.or(m.sandbox.as_deref()).unwrap_or("env").parse()?;
         // in the cache, not in the output: installs weigh hundreds of MB
-        let root = cache_dir().join("sandbox").join(a.slot.unwrap_or(&m.name));
+        let root = crate::cordon::place(&cache_dir(), a.slot.unwrap_or(&m.name))?;
         if !a.keep && root.exists() {
             remove_tree(&root).with_context(|| format!("emptying {}", root.display()))?;
         }
-        let sb = Sandbox::new(&root, mode)?;
+        let sb = Sandbox { network: m.network, ..Sandbox::new(&root, mode)? };
 
         let mut base = HashMap::new();
         for (k, v) in [
@@ -287,7 +291,9 @@ impl Stage {
         }
         red.rules.extend(Redactor::defaults().rules);
 
-        // prepare: clones, builds, installs; cached by `creates`
+        // prepare: clones, builds, installs; cached by `creates`. Under strict
+        // it writes the cache too, where clones and builds are kept (ADR-0006)
+        let prepares = sb.wrap_with(&[std::fs::canonicalize(cache_dir())?]);
         for (i, p) in m.prepare.iter().enumerate() {
             let label = if p.about.is_empty() { format!("prepare {}", i + 1) } else { p.about.clone() };
             let gaps = missing_needs(&p.needs, &vars);
@@ -303,17 +309,10 @@ impl Stage {
                 }
             }
             say(format!("{label}…"));
-            let st = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&p.run)
-                .current_dir(a.out)
-                .envs(&vars)
-                .status()
-                .context("running sh")?;
-            if !st.success() {
-                bail!("{label} failed ({st}): {}", p.run);
-            }
+            prepares.sh(&[], &p.run).cwd(a.out).envs(&vars).run(&label)?;
         }
+        // before anina goes back to the root or to its saved copy
+        sb.still_in_place("prepare", &[pristine_of(&sb.root)])?;
 
         let theme = m.theme.as_ref().map(|t| dir.join(t).display().to_string()).unwrap_or_default();
         Ok(Stage {

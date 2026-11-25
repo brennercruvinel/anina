@@ -16,9 +16,17 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
-      - name: tmux (the optional engine)
+      - name: tmux (the optional engine) and, on Linux, bubblewrap (the strict sandbox)
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y tmux; else brew install tmux; fi
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get install -y tmux bubblewrap
+            # bwrap needs unprivileged user namespaces; Ubuntu 24.04 keeps them behind AppArmor
+            if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            fi
+          else
+            brew install tmux
+          fi
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo build --release

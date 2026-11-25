@@ -9,7 +9,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run --quiet -p anina -- doctor
 cargo deny check
-# the only warning expected here: the `leaks` test is not in the package.
+# the only warnings expected here: the `leaks` and `walls` tests are not in
+# the package.
 # a target dir under a new path on every run. once packaged, the workspace's
 # crates are registry crates to cargo: it unpacks each one into
 # ~/.cargo/registry/src/<hash of the registry's path>/ and never again at the
