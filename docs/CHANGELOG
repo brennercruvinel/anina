@@ -51,3 +51,4 @@
 - `presets/` is `demo/`. The CI workflow is `gatecheck.yml`.
 - The folders that held only a `.gitkeep` are gone: seven under `demo/` (presets still to come) and `pkgs/` with its four. Every folder in `demo/` is a preset.
 - Releases are tagged `v{{version}}` for the whole workspace.
+- The library crates know nothing of the command line (ADR-0013): `anina-render` and `anina-record` take plain `Request` structs in the place of `clap` argument structs, say their status lines to a `Notice` the caller passes and print nothing, and `anina-runner` keeps the state of a run in a `Scope` passed down, not in statics. Commands, flags and output are the same.

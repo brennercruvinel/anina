@@ -9,40 +9,34 @@ pub mod svg;
 pub mod theme;
 
 use anina_screen::frames::Cast;
+use anina_screen::notice::Notice;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use theme::Theme;
 
-#[derive(clap::Args, Debug)]
-pub struct Args {
-    /// The cast to render (.cast.json or .cast.json.gz)
+/// What `anina render` was asked: a cast drawn again, with another theme or
+/// speed. The command line fills it; nothing here knows of flags.
+#[derive(Debug, Clone)]
+pub struct Request {
+    /// The cast to render (.cast.json or .cast.json.gz).
     pub cast: PathBuf,
-    /// Output file (default: next to the cast, .svg)
-    #[arg(short, long)]
+    /// Output file (default: next to the cast, .svg).
     pub out: Option<PathBuf>,
-    /// Theme: a built-in name, a path to a theme JSON (anina or vhs), or auto
-    #[arg(long)]
+    /// A built-in name, a path to a theme JSON (anina or vhs), or auto.
     pub theme: Option<String>,
-    /// Longest a still screen stays, in seconds (default: the theme's)
-    #[arg(long)]
+    /// Longest a still screen stays, in seconds (default: the theme's).
     pub max_hold: Option<f64>,
-    /// Play everything X times faster
-    #[arg(long, default_value_t = 1.0)]
+    /// Play everything this many times faster.
     pub speed: f64,
-    /// Playback frame rate cap (default: the theme's)
-    #[arg(long)]
+    /// Playback frame rate cap (default: the theme's).
     pub max_fps: Option<f64>,
-    /// Dark window chrome (the theme's own); with --light writes both
-    #[arg(long)]
+    /// Dark window chrome (the theme's own); with `light` both are written.
     pub dark: bool,
-    /// Light window chrome around the unchanged terminal
-    #[arg(long)]
+    /// Light window chrome around the unchanged terminal.
     pub light: bool,
-    /// Do not embed the font subset (smaller, but looks different per machine)
-    #[arg(long)]
+    /// Do not embed the font subset.
     pub no_font: bool,
-    /// Also write the poster frame as a PNG
-    #[arg(long)]
+    /// Also write the poster frame as a PNG.
     pub poster: bool,
 }
 
@@ -51,9 +45,10 @@ fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
     p.with_file_name(format!("{stem}{suffix}.svg"))
 }
 
-pub fn run(a: Args) -> Result<()> {
+/// Draw the cast again. Each file written is said to `notice`.
+pub fn run(a: &Request, notice: &dyn Notice) -> Result<()> {
     let cast = Cast::load(&a.cast)?;
-    let th = Theme::resolve(a.theme.as_deref(), &cast)?;
+    let th = Theme::resolve(a.theme.as_deref(), &cast, notice)?;
     let opts = svg::Options { max_hold: a.max_hold, speed: a.speed, max_fps: a.max_fps, embed_font: !a.no_font };
     let out = a.out.clone().unwrap_or_else(|| {
         let s = a.cast.to_string_lossy();
@@ -70,8 +65,8 @@ pub fn run(a: Args) -> Result<()> {
         let r = svg::render_cast(&cast, t, &opts)?;
         svg::write(path, &r.svg)?;
         let gz = gzip_len(r.svg.as_bytes());
-        eprintln!(
-            "anina: {} frames, {} rows, {:.1}s, poster at {:.1}s, {} KB ({} KB gzip) -> {}",
+        notice.status(&format!(
+            "{} frames, {} rows, {:.1}s, poster at {:.1}s, {} KB ({} KB gzip) -> {}",
             cast.frames.len(),
             r.rows,
             r.total,
@@ -79,7 +74,7 @@ pub fn run(a: Args) -> Result<()> {
             r.svg.len() / 1024,
             gz / 1024,
             anina_screen::lesson::shown(path)
-        );
+        ));
     }
     svg::write(&out.with_extension("txt"), &svg::transcript(&cast))?;
     if variants.len() == 2 {
@@ -92,7 +87,7 @@ pub fn run(a: Args) -> Result<()> {
         );
         let p = out.with_extension("picture.html");
         std::fs::write(&p, &snippet)?;
-        eprintln!("anina: README snippet -> {}\n{snippet}", anina_screen::lesson::shown(&p));
+        notice.status(&format!("README snippet -> {}\n{snippet}", anina_screen::lesson::shown(&p)));
     }
     if a.poster && !cast.frames.is_empty() {
         let f = &cast.frames[cast.poster.min(cast.frames.len() - 1)];
@@ -101,7 +96,7 @@ pub fn run(a: Args) -> Result<()> {
             out.file_stem().map_or("out".into(), |s| s.to_string_lossy().into_owned())
         ));
         png::screen_png_with(&cast.screen(f.s), &cast.title, &th, &p)?;
-        eprintln!("anina: poster -> {}", anina_screen::lesson::shown(&p));
+        notice.status(&format!("poster -> {}", anina_screen::lesson::shown(&p)));
     }
     Ok(())
 }

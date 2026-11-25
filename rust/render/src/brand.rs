@@ -5,38 +5,37 @@
 
 use crate::theme::Theme;
 use anina_screen::frames::Cast;
+use anina_screen::notice::Notice;
 use anina_screen::{Color, Screen};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(clap::Args, Debug)]
-pub struct Args {
-    /// A cast to read colors from
+/// What `anina brand` was asked.
+#[derive(Debug, Clone)]
+pub struct Request {
+    /// A cast to read colors from.
     pub cast: PathBuf,
-    /// Where to write the theme JSON (default: stdout)
-    #[arg(short, long)]
+    /// Where to write the theme JSON; none gives it back to the caller.
     pub out: Option<PathBuf>,
 }
 
-pub fn run(a: Args) -> Result<()> {
+/// The theme of the cast's colors, as JSON. Written to `out` and said to
+/// `notice` when a file was asked; else returned, for the caller to show.
+pub fn run(a: &Request, notice: &dyn Notice) -> Result<Option<String>> {
     let cast = Cast::load(&a.cast)?;
     let th = derive(&cast);
     let json = serde_json::to_string_pretty(&th)?;
-    match a.out {
-        Some(p) => {
-            std::fs::write(&p, json + "\n").with_context(|| format!("writing {}", p.display()))?;
-            eprintln!(
-                "anina: theme -> {} (bg {}, fg {}, accent {})",
-                anina_screen::lesson::shown(&p),
-                th.terminal.bg,
-                th.terminal.fg,
-                th.caption.accent
-            );
-        }
-        None => println!("{json}"),
-    }
-    Ok(())
+    let Some(p) = &a.out else { return Ok(Some(json)) };
+    std::fs::write(p, json + "\n").with_context(|| format!("writing {}", p.display()))?;
+    notice.status(&format!(
+        "theme -> {} (bg {}, fg {}, accent {})",
+        anina_screen::lesson::shown(p),
+        th.terminal.bg,
+        th.terminal.fg,
+        th.caption.accent
+    ));
+    Ok(None)
 }
 
 /// The theme of a cast's own colors (up to 64 screens, spread evenly).

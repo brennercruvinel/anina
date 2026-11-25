@@ -16,6 +16,7 @@ use crate::cordon::{Mode, Sandbox};
 use crate::{Config, Options};
 use anina_runner::redact::{Redactor, scope::Scope};
 use anina_runner::script::{Tape, expand};
+use anina_screen::notice::Notice;
 use anyhow::{Context, Result, anyhow, bail};
 use include_dir::{Dir, include_dir};
 use specs::Manifest;
@@ -26,33 +27,24 @@ use std::time::Instant;
 
 static BUILTIN: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/demo");
 
-#[derive(clap::Args, Debug)]
-pub struct Args {
-    /// Preset name or directory
-    pub preset: String,
-    /// Run only these parts (repeatable; default: all, in order)
-    #[arg(long)]
+/// What `run` is asked of the preset `load` returned.
+#[derive(Clone, Debug)]
+pub struct Request {
+    /// Run only these parts; all of them, in order, when empty.
     pub part: Vec<String>,
-    /// Output directory (default: anina-out/<preset>)
-    #[arg(short, long)]
+    /// Output directory; `anina-out/<preset>` when none.
     pub out: Option<PathBuf>,
-    /// Terminal engine: tui-test (default) or tmux
-    #[arg(long, default_value = "tui-test")]
+    /// Terminal engine: `tui-test` or `tmux`.
     pub engine: String,
-    /// Sandbox mode, over the preset's: off, env, strict
-    #[arg(long)]
+    /// Sandbox mode, over the preset's: `off`, `env`, `strict`.
     pub sandbox: Option<String>,
-    /// Set a preset variable, K=V (the environment works too)
-    #[arg(long = "var", value_name = "K=V")]
+    /// Preset variables, `K=V` (the environment works too).
     pub vars: Vec<String>,
-    /// Extra redaction, REGEX=REPLACEMENT
-    #[arg(long = "redact", value_name = "RE=WITH")]
+    /// Extra redaction, `REGEX=REPLACEMENT`.
     pub redact: Vec<String>,
-    /// Keep the sandbox of the last run instead of starting empty
-    #[arg(long)]
+    /// Keep the sandbox of the last run instead of starting empty.
     pub keep: bool,
-    /// Put the images inside index.html: one file to share
-    #[arg(long)]
+    /// Put the images inside index.html: one file to share.
     pub embed: bool,
 }
 
@@ -103,7 +95,7 @@ pub fn resolve(name: &str) -> Result<PathBuf> {
         dir.extract(&dest).with_context(|| format!("extracting the {name} preset"))?;
         return Ok(dest.join(name));
     }
-    let known: Vec<String> = list_all().into_iter().map(|(n, _)| n).collect();
+    let known: Vec<String> = list().into_iter().map(|(n, _)| n).collect();
     bail!("no preset {name:?}; known: {}", known.join(", "))
 }
 
@@ -122,8 +114,9 @@ fn is_builtin(d: &Dir) -> bool {
     d.get_file(d.path().join("preset.toml")).is_some()
 }
 
-/// Every preset anina can find: (name, where).
-fn list_all() -> Vec<(String, String)> {
+/// Every preset anina can find, in lookup order: its name and where it was
+/// found (a folder, or `built in`). `resolve` and `Manifest::load` read one.
+pub fn list() -> Vec<(String, String)> {
     let mut seen: Vec<(String, String)> = Vec::new();
     for d in search_dirs() {
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
@@ -143,37 +136,6 @@ fn list_all() -> Vec<(String, String)> {
         }
     }
     seen
-}
-
-pub fn list() -> Result<()> {
-    for (name, from) in list_all() {
-        let dir = match resolve(&name) {
-            Ok(d) => d,
-            Err(e) => {
-                println!("{name:10} ({from}) unreadable: {e:#}");
-                continue;
-            }
-        };
-        let m = match Manifest::load(&dir) {
-            Ok(m) => m,
-            Err(e) => {
-                println!("{name:10} ({from}) invalid: {e:#}");
-                continue;
-            }
-        };
-        let missing: Vec<&str> =
-            m.requires.iter().filter(|r| crate::which(&r.program).is_none()).map(|r| r.program.as_str()).collect();
-        let parts: Vec<&str> = m.parts.iter().map(|p| p.name.as_str()).collect();
-        let status = if missing.is_empty() { "ready".to_string() } else { format!("needs {}", missing.join(", ")) };
-        println!("{name:10} {}", m.description);
-        println!(
-            "{:10} parts: {} · {status}{} · {from}",
-            "",
-            parts.join(", "),
-            if m.network { " · network" } else { "" }
-        );
-    }
-    Ok(())
 }
 
 /// The variables of a run: the built-in ones, then the preset's (the
@@ -233,9 +195,10 @@ pub struct StageArgs<'a> {
 }
 
 impl Stage {
-    /// Stage the preset `load` returned; its redaction counts in `scope`.
-    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs, scope: &Scope) -> Result<Stage> {
-        let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
+    /// Stage the preset `load` returned; its redaction counts in `scope`, and
+    /// what prepare does is said to `notice`.
+    pub fn new(dir: PathBuf, m: Manifest, a: &StageArgs, scope: &Scope, notice: &dyn Notice) -> Result<Stage> {
+        let say = |msg: String| notice.status(&msg);
 
         // what the machine must have
         let missing: Vec<String> = m
@@ -371,8 +334,8 @@ impl Stage {
     /// Put the sandbox back as `freeze` left it. Nothing to do before the
     /// first play; after one, only what it changed is put back (an install of
     /// hundreds of MB stays where it is) and read again, and the whole tree
-    /// is copied again only when that fails.
-    pub fn restore(&self) -> Result<()> {
+    /// is copied again only when that fails, which is said to `notice`.
+    pub fn restore(&self, notice: &dyn Notice) -> Result<()> {
         if self.fresh.replace(false) {
             return Ok(());
         }
@@ -382,7 +345,8 @@ impl Stage {
         match put_back(root, &self.pristine(), &changed) {
             Ok(()) => now.refresh(root, &changed),
             Err(e) => {
-                eprintln!("anina: putting back {} path(s) failed ({e}); copying the whole sandbox", changed.len());
+                let n = changed.len();
+                notice.status(&format!("putting back {n} path(s) failed ({e}); copying the whole sandbox"));
                 remove_tree(root).with_context(|| format!("emptying {}", root.display()))?;
                 copy_tree(&self.pristine(), root).with_context(|| format!("restoring {}", root.display()))?;
                 now = Snapshot::take(root);
@@ -524,9 +488,9 @@ fn writable(dir: &Path) {
     }
 }
 
-/// Run a preset; returns the output directory.
-pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
-    let (dir, m) = load(&a.preset)?;
+/// Run the preset `load` returned (`dir`, `m`); returns the output directory.
+/// Each step of the way is said to `notice`.
+pub fn run(dir: PathBuf, m: Manifest, a: &Request, scope: &Scope, notice: &dyn Notice) -> Result<PathBuf> {
     // picked before any work: a wrong --part fails here
     let parts: Vec<specs::Part> = m.pick(&a.part)?.into_iter().cloned().collect();
     let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&m.name));
@@ -542,9 +506,9 @@ pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
         keep: a.keep,
         slot: None,
     };
-    let stage = Stage::new(dir, m, &args, scope)?;
+    let stage = Stage::new(dir, m, &args, scope, notice)?;
     let (m, sb, red) = (&stage.manifest, &stage.sandbox, &stage.red);
-    let say = |msg: String| eprintln!("anina [{}] {msg}", m.name);
+    let say = |msg: String| notice.status(&msg);
 
     let before = Snapshot::take(&sb.root);
     let mut results = Vec::new();
@@ -588,7 +552,7 @@ pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
                 let cast_path = pdir.join(format!("{}.cast.json.gz", part.name));
                 rec.cast.save(&cast_path)?;
                 let svg = pdir.join(format!("{}.svg", part.name));
-                let svg_ok = match anina_render::svg::write_cast_svg(&rec.cast, None, &svg) {
+                let svg_ok = match anina_render::svg::write_cast_svg(&rec.cast, None, &svg, notice) {
                     Ok(()) => true,
                     Err(e) => {
                         say(format!("  no svg: {e:#}"));

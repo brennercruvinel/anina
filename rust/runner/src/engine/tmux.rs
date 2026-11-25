@@ -219,14 +219,13 @@ mod tests {
         }
     }
 
-    /// Whether tmux is here to be tried. Without it the test says so and
-    /// passes on a developer's machine; in CI it fails, where it is installed.
+    /// Whether tmux is here to be tried. Without it the test passes on a
+    /// developer's machine, untried; in CI it fails, where it is installed.
     fn tmux_here() -> bool {
         if Command::new("tmux").arg("-V").output().is_ok_and(|o| o.status.success()) {
             return true;
         }
         assert!(std::env::var_os("CI").is_none(), "tmux is missing: the tmux engine was not tested");
-        eprintln!("skipped: no tmux here, the tmux engine was not tested");
         false
     }
 

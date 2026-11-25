@@ -15,7 +15,6 @@ anina-screen.workspace = true
 anina-runner.workspace = true
 anina-render.workspace = true
 anyhow.workspace = true
-clap.workspace = true
 include_dir.workspace = true
 serde.workspace = true
 serde_json.workspace = true

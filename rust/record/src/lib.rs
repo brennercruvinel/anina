@@ -11,6 +11,7 @@ use anina_runner::redact::Redactor;
 use anina_runner::redact::scope::Scope;
 use anina_runner::script::{Step, Tape};
 use anina_screen::frames::{Cast, Frame, now_iso};
+use anina_screen::notice::Notice;
 use anina_screen::{Pattern, Screen};
 use anyhow::{Result, anyhow, bail};
 use std::collections::HashMap;
@@ -509,44 +510,42 @@ pub fn record(tape: &Tape, base: Config, opts: Options) -> Result<Recording> {
     })
 }
 
-#[derive(clap::Args, Debug)]
-pub struct Args {
-    /// The tape to play (anina or vhs dialect)
+/// What `run` is asked: a tape, where its recording goes and what to make
+/// of it.
+#[derive(Clone, Debug)]
+pub struct Request {
+    /// The tape to play (anina or vhs dialect).
     pub tape: PathBuf,
-    /// Output directory (default: anina-out/<tape name>)
-    #[arg(short, long)]
+    /// Output directory; `anina-out/<tape name>` when none.
     pub out: Option<PathBuf>,
-    /// Terminal engine: tui-test (default) or tmux
-    #[arg(long, default_value = "tui-test")]
+    /// Terminal engine: `tui-test` or `tmux`.
     pub engine: String,
-    /// Theme for the SVG (default: the tape's, else derived from the app)
-    #[arg(long)]
+    /// Theme for the SVG; the tape's when none, else derived from the app.
     pub theme: Option<String>,
-    /// Only record the cast, render nothing
-    #[arg(long)]
+    /// Only record the cast, render nothing.
     pub no_render: bool,
-    /// Variables for the tape, K=V (also read from the environment)
-    #[arg(long = "var", value_name = "K=V")]
+    /// Variables for the tape, `K=V`.
     pub vars: Vec<String>,
 }
 
-/// Record a tape; returns the output directory.
-pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
-    let name = a.tape.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned());
-    let out = a.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
+/// Record a tape; returns the output directory. What it wrote and what it
+/// went on without are said to `notice`.
+pub fn run(r: &Request, scope: &Scope, notice: &dyn Notice) -> Result<PathBuf> {
+    let name = r.tape.file_stem().map_or("tape".into(), |s| s.to_string_lossy().into_owned());
+    let out = r.out.clone().unwrap_or_else(|| PathBuf::from("anina-out").join(&name));
     std::fs::create_dir_all(&out)?;
     scope.writes_to(&out);
-    let mut vars = anina_runner::script::base_vars(&a.tape, &out);
-    for kv in &a.vars {
+    let mut vars = anina_runner::script::base_vars(&r.tape, &out);
+    for kv in &r.vars {
         let (k, v) = kv.split_once('=').ok_or_else(|| anyhow!("--var takes K=V"))?;
         vars.insert(k.into(), v.into());
     }
-    let tape = Tape::load(&a.tape, &vars)?;
+    let tape = Tape::load(&r.tape, &vars)?;
     for w in &tape.warnings {
-        eprintln!("anina: warning: {w}");
+        notice.warning(w);
     }
     let opts = Options {
-        engine: a.engine.clone(),
+        engine: r.engine.clone(),
         out_dir: out.clone(),
         redactor: Some(scope.redactor().clone()),
         png: true,
@@ -554,30 +553,30 @@ pub fn run(a: Args, scope: &Scope) -> Result<PathBuf> {
     };
     let rec = record(&tape, Config::default(), opts)?;
     for w in rec.warnings.iter().skip(tape.warnings.len()) {
-        eprintln!("anina: warning: {w}");
+        notice.warning(w);
     }
     let cast_path = out.join(format!("{name}.cast.json.gz"));
     rec.cast.save(&cast_path)?;
-    eprintln!(
-        "anina: {} frames, {} screens -> {}",
+    notice.status(&format!(
+        "{} frames, {} screens -> {}",
         rec.cast.frames.len(),
         rec.cast.screens.len(),
         anina_screen::lesson::shown(&cast_path)
-    );
-    if let Some(r) = scope.redactor().summary() {
-        eprintln!("anina: redacted {r}");
+    ));
+    if let Some(hid) = scope.redactor().summary() {
+        notice.status(&format!("redacted {hid}"));
     }
     for o in tape.outputs() {
         let p = out.join(Path::new(&o).file_name().unwrap_or_default());
         if o.ends_with(".cast") {
             std::fs::write(&p, rec.cast.to_asciicast())?;
-            eprintln!("anina: asciicast -> {}", anina_screen::lesson::shown(&p));
+            notice.status(&format!("asciicast -> {}", anina_screen::lesson::shown(&p)));
         }
     }
-    if !a.no_render {
+    if !r.no_render {
         let svg = out.join(format!("{name}.svg"));
-        anina_render::svg::write_cast_svg(&rec.cast, a.theme.as_deref(), &svg)?;
-        eprintln!("anina: svg -> {}", anina_screen::lesson::shown(&svg));
+        anina_render::svg::write_cast_svg(&rec.cast, r.theme.as_deref(), &svg, notice)?;
+        notice.status(&format!("svg -> {}", anina_screen::lesson::shown(&svg)));
     }
     Ok(out)
 }

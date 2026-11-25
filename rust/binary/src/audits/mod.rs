@@ -13,6 +13,7 @@ pub mod print;
 pub mod ratio;
 pub mod score;
 
+use crate::Stderr;
 use anina_record::preset::{Stage, StageArgs};
 use anina_record::{self as record, Config, Options};
 use anina_runner::engine::{self, Spec};
@@ -131,6 +132,7 @@ fn run_preset(a: &Args, preset: &str, scope: &Scope) -> Result<()> {
             slot: Some(&slot),
         },
         scope,
+        &Stderr::Preset(name.clone()),
     )?;
     stage.freeze()?;
     for part in &parts {
@@ -170,7 +172,7 @@ fn audit(a: &Args, tape: &Tape, target: &str, out: &Path, stage: Option<&Stage>,
         let started = Instant::now();
         let cfg = match stage {
             Some(st) => {
-                st.restore()?;
+                st.restore(&Stderr::Command)?;
                 st.config(&v.name)
             }
             None => Config::default(),

@@ -18,6 +18,7 @@
 use super::fonts;
 use super::theme::Theme;
 use anina_screen::frames::{Cast, Frame};
+use anina_screen::notice::Notice;
 use anina_screen::{Cell, Screen, attr};
 use anyhow::{Context, Result};
 use std::collections::{BTreeSet, HashMap};
@@ -924,9 +925,10 @@ pub fn transcript(cast: &Cast) -> String {
 
 /// Render `cast` to an animated SVG at `path` (and its transcript next to
 /// it, as .txt). `theme` overrides the cast's own; none at all derives one
-/// from the recording's colors.
-pub fn write_cast_svg(cast: &Cast, theme: Option<&str>, path: &Path) -> Result<()> {
-    let th = Theme::resolve(theme, cast)?;
+/// from the recording's colors. A theme of the cast's that cannot be found is
+/// a warning to `notice`.
+pub fn write_cast_svg(cast: &Cast, theme: Option<&str>, path: &Path, notice: &dyn Notice) -> Result<()> {
+    let th = Theme::resolve(theme, cast, notice)?;
     let r = render_cast(cast, &th, &Options::default())?;
     write(path, &r.svg)?;
     write(&path.with_extension("txt"), &transcript(cast))
