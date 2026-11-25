@@ -46,11 +46,13 @@ Under `strict`, everything a run starts goes through the OS sandbox: the program
 | | macOS, `sandbox-exec` | Linux, `bwrap` |
 | --- | --- | --- |
 | writes | refused, except under the root, `/dev` and `/private/var/folders` (your real per-user temp and cache folders, not only the sandbox's), and on the entry `/private/tmp` itself, not on what is in it | the whole file system is read-only, except the root, a new `/dev` and an empty `/tmp` of its own |
-| the root itself | cannot be removed or renamed from inside | is a mount point |
-| `prepare` | may also write anina's cache | may also write anina's cache |
+| the root itself | cannot be removed or renamed from inside, nor can the folders of the cache that hold it | is a mount point |
+| `prepare` | may also write anina's cache, the other presets' sandboxes and saved copies in it included | may also write anina's cache, the other presets' sandboxes and saved copies in it included |
 | network | refused, the loopback and name lookups included; a socket file under the root still works | a network namespace of its own: the machine's loopback and every other address are out of reach |
 | reads | everything you can read | everything you can read |
 | processes | not isolated | it sees only its own, and dies with anina |
+
+anina itself is not confined, and it goes back to the root when `prepare` is done. So it checks first that the root is still the folder it made, with no link on the way to it or to the copy it saves of it, and stops if not; a run also checks the way to its root before it empties it.
 
 The network is off unless the preset says `network = true`. `explore` has no preset, so `explore --sandbox strict` has no network; explore a program that needs one under `env`.
 
