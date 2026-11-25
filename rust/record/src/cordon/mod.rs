@@ -84,15 +84,15 @@ fn plain(path: &Path) -> bool {
     there.is_none_or(|p| std::fs::canonicalize(p).is_ok_and(|real| real == p))
 }
 
-/// Where the sandbox `name` lives in anina's `cache`: `CACHE/sandbox/NAME`,
-/// as the system names it. The cache may be a link (one kept on another
-/// disk). Below it nothing may lead away, neither a link nor the name (`..`,
-/// a path from `/`), and that is settled before anina empties or fills the
-/// folder: a `prepare` writes the cache, and an earlier one may have left a
-/// link there.
-pub fn place(cache: &Path, name: &str) -> Result<PathBuf> {
+/// Where anina keeps the folder `name` of one `kind` in its `cache`:
+/// `CACHE/KIND/NAME`, as the system names it. The cache may be a link (one
+/// kept on another disk). Below it nothing may lead away, neither a link nor
+/// the name (`..`, a path from `/`), and that is settled before anina empties
+/// or fills the folder: a `prepare` writes the cache, and an earlier one may
+/// have left a link there.
+pub fn kept(cache: &Path, kind: &str, name: &str) -> Result<PathBuf> {
     std::fs::create_dir_all(cache).with_context(|| format!("creating {}", cache.display()))?;
-    let held = std::fs::canonicalize(cache)?.join("sandbox");
+    let held = std::fs::canonicalize(cache)?.join(kind);
     let root = held.join(name);
     if root == held || !root.starts_with(&held) || !plain(&root) {
         bail!(
@@ -101,6 +101,12 @@ pub fn place(cache: &Path, name: &str) -> Result<PathBuf> {
         );
     }
     Ok(root)
+}
+
+/// Where the sandbox `name` lives in anina's `cache`: `CACHE/sandbox/NAME`
+/// (see `kept`).
+pub fn place(cache: &Path, name: &str) -> Result<PathBuf> {
+    kept(cache, "sandbox", name)
 }
 
 impl Sandbox {

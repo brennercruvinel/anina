@@ -52,7 +52,7 @@ Under `strict`, everything a run starts goes through the OS sandbox: the program
 | reads | everything you can read | everything you can read |
 | processes | not isolated | it sees only its own, and dies with anina |
 
-anina itself is not confined, and it goes back to the root when `prepare` is done. So it checks first that the root is still the folder it made, with no link on the way to it or to the copy it saves of it, and stops if not; a run also checks the way to its root before it empties it.
+anina itself is not confined, and it goes back to the root when `prepare` is done. So it checks first that the root is still the folder it made, with no link on the way to it or to the copy it saves of it, and stops if not; a run also checks the way to its root before it empties it, and the way to the folder a built-in preset is extracted to.
 
 The network is off unless the preset says `network = true`. `explore` has no preset, so `explore --sandbox strict` has no network; explore a program that needs one under `env`.
 
