@@ -318,6 +318,14 @@ fn anina_run_opens_the_network_for_a_preset_that_declares_it() {
     assert!(said.contains(NO_NETWORK), "{said}");
     assert!(said.contains("the network is off (a preset turns it on with network = true)"), "{said}");
 
+    // the program alone, in the terminal anina gives it: it never gets to say so
+    let alone = tape.split_once('\n').unwrap().1;
+    let p = preset(&dir, "", alone);
+    let o = run(&dir, &p, &["--sandbox", "strict"]);
+    let said = stderr(&o);
+    assert!(!o.status.success(), "{said}");
+    assert!(said.contains("part.tape:2:"), "{said}");
+
     // declared: prepare, the Exec and the program all reach the listener
     let p = preset(&dir, &format!("network = true\n{prepare}"), &tape);
     let o = run(&dir, &p, &["--sandbox", "strict"]);
